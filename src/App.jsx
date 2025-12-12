@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, Play, Pause, Download, Trash2, Plus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Sparkles, Type, ZoomIn, ZoomOut } from 'lucide-react';
 
 const CutFlowApp = () => {
   const [currentPage, setCurrentPage] = useState('login');
@@ -21,6 +21,24 @@ const CutFlowApp = () => {
   const [exportProgress, setExportProgress] = useState(0);
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('demo1234');
+  
+  // 타임라인 상태
+  const [tracks, setTracks] = useState([
+    { id: 'video', type: 'video', name: '비디오', icon: Video, color: 'bg-blue-500' },
+    { id: 'audio', type: 'audio', name: '오디오', icon: Music, color: 'bg-green-500' },
+    { id: 'image', type: 'image', name: '이미지', icon: Image, color: 'bg-yellow-500' },
+    { id: 'text', type: 'text', name: '텍스트 효과', icon: Type, color: 'bg-purple-500' },
+    { id: 'graphics', type: 'graphics', name: '그래픽 효과', icon: Sparkles, color: 'bg-pink-500' }
+  ]);
+  const [clips, setClips] = useState([
+    { id: 1, trackId: 'video', startTime: 0, endTime: 30, name: 'sample-video.mp4', type: 'video' },
+    { id: 2, trackId: 'audio', startTime: 5, endTime: 25, name: 'background-music.mp3', type: 'audio' },
+    { id: 3, trackId: 'text', startTime: 10, endTime: 20, name: 'Hello World', type: 'text' }
+  ]);
+  const [selectedClip, setSelectedClip] = useState(null);
+  const [timelineZoom, setTimelineZoom] = useState(1);
+  const [timelineScroll, setTimelineScroll] = useState(0);
+  const timelineRef = useRef(null);
 
   useEffect(() => {
     let interval;
@@ -66,9 +84,23 @@ const CutFlowApp = () => {
         fontFamily: 'Arial'
       };
       setTexts([...texts, newText]);
+      
+      // 타임라인에 텍스트 클립 추가
+      const textClip = {
+        id: Date.now() + 1,
+        trackId: 'text',
+        startTime: currentTime,
+        endTime: Math.min(currentTime + 10, duration),
+        name: newTextContent,
+        type: 'text',
+        textId: newText.id
+      };
+      setClips([...clips, textClip]);
+      
       setNewTextContent('');
       setShowTextInput(false);
       setSelectedText(newText.id);
+      setSelectedClip(textClip.id);
     }
   };
 
@@ -78,6 +110,8 @@ const CutFlowApp = () => {
 
   const deleteText = (id) => {
     setTexts(texts.filter(t => t.id !== id));
+    // 관련된 타임라인 클립도 삭제
+    setClips(clips.filter(c => !(c.type === 'text' && c.textId === id)));
     setSelectedText(null);
   };
 
@@ -102,6 +136,70 @@ const CutFlowApp = () => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 타임라인 함수들
+  const addClip = (trackId, type) => {
+    const newClip = {
+      id: Date.now(),
+      trackId,
+      startTime: currentTime,
+      endTime: Math.min(currentTime + 10, duration),
+      name: type === 'video' ? '새 비디오' : type === 'audio' ? '새 오디오' : type === 'image' ? '새 이미지' : type === 'text' ? '새 텍스트' : '새 효과',
+      type
+    };
+    setClips([...clips, newClip]);
+    setSelectedClip(newClip.id);
+  };
+
+  const deleteClip = (clipId) => {
+    setClips(clips.filter(c => c.id !== clipId));
+    if (selectedClip === clipId) setSelectedClip(null);
+  };
+
+  const updateClip = (clipId, updates) => {
+    setClips(clips.map(c => c.id === clipId ? { ...c, ...updates } : c));
+  };
+
+  const handleClipDrag = (clipId, newStartTime) => {
+    const clip = clips.find(c => c.id === clipId);
+    if (!clip) return;
+    const clipDuration = clip.endTime - clip.startTime;
+    const clampedStart = Math.max(0, Math.min(newStartTime, duration - clipDuration));
+    updateClip(clipId, { 
+      startTime: clampedStart, 
+      endTime: clampedStart + clipDuration 
+    });
+  };
+
+  const handleClipResize = (clipId, side, newTime) => {
+    const clip = clips.find(c => c.id === clipId);
+    if (!clip) return;
+    
+    if (side === 'left') {
+      const clampedStart = Math.max(0, Math.min(newTime, clip.endTime - 1));
+      updateClip(clipId, { startTime: clampedStart });
+    } else {
+      const clampedEnd = Math.max(clip.startTime + 1, Math.min(newTime, duration));
+      updateClip(clipId, { endTime: clampedEnd });
+    }
+  };
+
+  const getClipsForTrack = (trackId) => {
+    return clips.filter(c => c.trackId === trackId).sort((a, b) => a.startTime - b.startTime);
+  };
+
+  const pixelsPerSecond = 10 * timelineZoom;
+  const timelineWidth = duration * pixelsPerSecond;
+
+  const handleTimelineClick = (e) => {
+    if (!timelineRef.current) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const scrollContainer = e.currentTarget.closest('.overflow-x-auto');
+    const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+    const x = e.clientX - rect.left + scrollLeft - 128; // 트랙 헤더 너비 제외
+    const newTime = Math.max(0, Math.min((x / pixelsPerSecond), duration));
+    setCurrentTime(newTime);
   };
 
   if (currentPage === 'login') {
@@ -223,17 +321,222 @@ const CutFlowApp = () => {
           </div>
         </div>
 
-        <div className="bg-gray-800 border-t border-gray-700 p-4 shadow-lg">
-          <div className="mb-4 space-y-1">
-            <div onClick={handleSeek} className="w-full h-2 bg-gray-700 rounded cursor-pointer relative group hover:h-3 transition-all shadow-inner">
-              <div className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded transition-all shadow" style={{ width: `${(currentTime / duration) * 100}%` }} />
+        <div className="bg-gray-800 border-t border-gray-700 shadow-lg flex flex-col">
+          {/* 타임라인 UI */}
+          <div className="border-b border-gray-700 bg-gray-900">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-gray-300">타임라인</h3>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => setTimelineZoom(Math.max(0.5, timelineZoom - 0.25))}
+                    className="p-1 hover:bg-gray-700 rounded transition"
+                    title="줌 아웃"
+                  >
+                    <ZoomOut size={16} />
+                  </button>
+                  <span className="text-xs text-gray-400 px-2">{Math.round(timelineZoom * 100)}%</span>
+                  <button 
+                    onClick={() => setTimelineZoom(Math.min(3, timelineZoom + 0.25))}
+                    className="p-1 hover:bg-gray-700 rounded transition"
+                    title="줌 인"
+                  >
+                    <ZoomIn size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="text-xs text-gray-400">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </div>
             </div>
-            <div className="text-xs text-gray-400 text-center">
-              타임라인: {formatTime(currentTime)} / {formatTime(duration)}
+            
+            <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: '300px' }} onScroll={(e) => setTimelineScroll(e.target.scrollLeft)}>
+              <div className="flex" style={{ minWidth: `${timelineWidth + 128}px` }}>
+                {/* 시간 스케일 */}
+                <div className="w-32 bg-gray-800 border-r border-gray-700 flex-shrink-0 sticky left-0 z-20">
+                  <div className="h-8 border-b border-gray-700"></div>
+                </div>
+                <div className="relative" style={{ width: `${timelineWidth}px` }}>
+                  {/* 시간 마커 */}
+                  <div className="absolute top-0 left-0 right-0 h-8 bg-gray-800 border-b border-gray-700 z-10">
+                    {Array.from({ length: Math.ceil(duration / 5) + 1 }, (_, i) => i * 5).map(sec => (
+                      <div
+                        key={sec}
+                        className="absolute border-l border-gray-600"
+                        style={{ left: `${sec * pixelsPerSecond}px`, height: '100%' }}
+                      >
+                        <span className="absolute top-1 left-1 text-xs text-gray-400">{formatTime(sec)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* 재생 헤드 */}
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 z-30 pointer-events-none"
+                    style={{ left: `${currentTime * pixelsPerSecond}px` }}
+                  >
+                    <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-yellow-400"></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 트랙들 */}
+              <div 
+                ref={timelineRef}
+                className="relative"
+                onClick={handleTimelineClick}
+                onWheel={(e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    setTimelineZoom(Math.max(0.5, Math.min(3, timelineZoom - e.deltaY * 0.001)));
+                  }
+                }}
+                style={{ 
+                  cursor: 'pointer',
+                  minWidth: `${timelineWidth + 128}px`
+                }}
+              >
+                {tracks.map(track => {
+                  const trackClips = getClipsForTrack(track.id);
+                  const TrackIcon = track.icon;
+                  
+                  return (
+                    <div key={track.id} className="flex border-b border-gray-700 hover:bg-gray-750 transition">
+                      {/* 트랙 헤더 */}
+                      <div className="w-32 bg-gray-800 border-r border-gray-700 flex-shrink-0 sticky left-0 z-10 flex items-center gap-2 px-3 py-2">
+                        <TrackIcon size={16} className={track.color.replace('bg-', 'text-')} />
+                        <span className="text-xs font-semibold text-gray-300 truncate">{track.name}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addClip(track.id, track.type);
+                          }}
+                          className="ml-auto p-1 hover:bg-gray-700 rounded transition"
+                          title="클립 추가"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      
+                      {/* 트랙 컨텐츠 */}
+                      <div className="flex-1 relative h-16 bg-gray-900" style={{ width: `${timelineWidth}px` }}>
+                        {trackClips.map(clip => {
+                          const clipLeft = clip.startTime * pixelsPerSecond;
+                          const clipWidth = (clip.endTime - clip.startTime) * pixelsPerSecond;
+                          const isSelected = selectedClip === clip.id;
+                          
+                          return (
+                            <div
+                              key={clip.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedClip(clip.id);
+                                setCurrentTime(clip.startTime);
+                              }}
+                              className={`absolute top-1 bottom-1 rounded cursor-move transition-all ${
+                                isSelected 
+                                  ? `${track.color} ring-2 ring-yellow-400 shadow-lg` 
+                                  : `${track.color} opacity-80 hover:opacity-100 hover:shadow-md`
+                              }`}
+                              style={{
+                                left: `${clipLeft}px`,
+                                width: `${clipWidth}px`,
+                                minWidth: '40px'
+                              }}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move';
+                                setSelectedClip(clip.id);
+                              }}
+                              onDrag={(e) => {
+                                if (!timelineRef.current) return;
+                                const rect = timelineRef.current.getBoundingClientRect();
+                                const scrollContainer = timelineRef.current.closest('.overflow-x-auto');
+                                const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+                                const x = e.clientX - rect.left + scrollLeft - 128;
+                                const newStartTime = Math.max(0, (x / pixelsPerSecond) - (clip.endTime - clip.startTime) / 2);
+                                handleClipDrag(clip.id, newStartTime);
+                              }}
+                            >
+                              <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold">
+                                <span className="truncate flex-1">{clip.name}</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs opacity-75">{formatTime(clip.startTime)}</span>
+                                  {isSelected && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteClip(clip.id);
+                                      }}
+                                      className="p-0.5 hover:bg-red-600 rounded transition"
+                                      title="삭제"
+                                    >
+                                      <Trash2 size={10} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              {/* 리사이즈 핸들 */}
+                              {isSelected && (
+                                <>
+                                  <div
+                                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-50"
+                                    onMouseDown={(e) => {
+                                      e.stopPropagation();
+                                      const startX = e.clientX;
+                                      const startTime = clip.startTime;
+                                      
+                                      const handleMouseMove = (e2) => {
+                                        const deltaX = (e2.clientX - startX) / pixelsPerSecond;
+                                        handleClipResize(clip.id, 'left', startTime + deltaX);
+                                      };
+                                      
+                                      const handleMouseUp = () => {
+                                        document.removeEventListener('mousemove', handleMouseMove);
+                                        document.removeEventListener('mouseup', handleMouseUp);
+                                      };
+                                      
+                                      document.addEventListener('mousemove', handleMouseMove);
+                                      document.addEventListener('mouseup', handleMouseUp);
+                                    }}
+                                  />
+                                  <div
+                                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-50"
+                                    onMouseDown={(e) => {
+                                      e.stopPropagation();
+                                      const startX = e.clientX;
+                                      const startTime = clip.endTime;
+                                      
+                                      const handleMouseMove = (e2) => {
+                                        const deltaX = (e2.clientX - startX) / pixelsPerSecond;
+                                        handleClipResize(clip.id, 'right', startTime + deltaX);
+                                      };
+                                      
+                                      const handleMouseUp = () => {
+                                        document.removeEventListener('mousemove', handleMouseMove);
+                                        document.removeEventListener('mouseup', handleMouseUp);
+                                      };
+                                      
+                                      document.addEventListener('mousemove', handleMouseMove);
+                                      document.addEventListener('mouseup', handleMouseUp);
+                                    }}
+                                  />
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
+          {/* 컨트롤 버튼들 */}
+          <div className="p-4 flex items-center justify-between">
             <button onClick={togglePlay} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition flex items-center gap-2 font-semibold shadow">
               {isPlaying ? <Pause size={20} /> : <Play size={20} className="fill-white" />}
               <span>{isPlaying ? '일시정지' : '재생'}</span>

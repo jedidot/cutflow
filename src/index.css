@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 로그인 화면이 다른 요소에 가려지지 않도록 */
+body {
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  position: relative;
+}

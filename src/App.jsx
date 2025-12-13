@@ -1434,12 +1434,33 @@ const CutFlowApp = () => {
                         </div>
                       );
                     })}
+                    
+                    {/* 클립 시작/끝 가이드 라인 (시간 마커 영역) */}
+                    {tracks.map(track => {
+                      const trackClips = getClipsForTrack(track.id);
+                      return (
+                        <React.Fragment key={`time-guide-${track.id}`}>
+                          {trackClips.map(clip => (
+                            <React.Fragment key={`time-guide-${clip.id}`}>
+                              <div
+                                className="absolute top-0 bottom-0 w-0.5 bg-blue-400 opacity-40 z-5"
+                                style={{ left: `${clip.startTime * pixelsPerSecond}px` }}
+                              />
+                              <div
+                                className="absolute top-0 bottom-0 w-0.5 bg-red-400 opacity-40 z-5"
+                                style={{ left: `${clip.endTime * pixelsPerSecond}px` }}
+                              />
+                            </React.Fragment>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
                   </div>
                   
                   {/* 재생 헤드 */}
                   <div
                     className="absolute top-0 bottom-0 z-30 cursor-ew-resize"
-                    style={{ left: `${currentTime * pixelsPerSecond}px` }}
+                    style={{ left: `${Math.min(currentTime, duration) * pixelsPerSecond}px` }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
                       setIsDraggingPlayhead(true);

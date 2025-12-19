@@ -15,6 +15,8 @@ const CutFlowApp = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [texts, setTexts] = useState([]);
   const [selectedText, setSelectedText] = useState(null);
+  const [editingTextId, setEditingTextId] = useState(null);
+  const [isDraggingText, setIsDraggingText] = useState(false);
   const [showTextInput, setShowTextInput] = useState(false);
   const [newTextContent, setNewTextContent] = useState('');
   const [effects, setEffects] = useState([]);
@@ -23,6 +25,8 @@ const CutFlowApp = () => {
   const [snapGuideTime, setSnapGuideTime] = useState(null);
   const [draggingClipTime, setDraggingClipTime] = useState(null); // 드래그 중인 클립의 시간
   const [resizingClipTime, setResizingClipTime] = useState(null); // 리사이즈 중인 클립의 시간
+  const [resizingClipId, setResizingClipId] = useState(null); // 리사이즈 중인 클립의 ID
+  const [resizingSide, setResizingSide] = useState(null); // 리사이즈 중인 쪽 ('left' | 'right')
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [email, setEmail] = useState('demo@example.com');
@@ -405,8 +409,8 @@ const CutFlowApp = () => {
   const audioRef = useRef(null);
 
   const togglePlay = () => {
-    if (!currentVideoFile && clips.filter(c => c.type === 'audio').length === 0) {
-      alert('⚠️ 먼저 비디오나 오디오를 업로드하고 타임라인에 추가해주세요.');
+    if (clips.length === 0) {
+      alert('⚠️ 먼저 타임라인에 오브젝트를 추가해주세요.');
       return;
     }
     setIsPlaying(!isPlaying);
@@ -738,7 +742,7 @@ const CutFlowApp = () => {
     return clips.filter(c => c.trackId === trackId).sort((a, b) => a.startTime - b.startTime);
   };
 
-  const pixelsPerSecond = 10 * timelineZoom;
+  const pixelsPerSecond = 20 * timelineZoom;
   const timelineWidth = duration * pixelsPerSecond;
 
   const handleTimelineClick = (e) => {
@@ -1026,7 +1030,7 @@ const CutFlowApp = () => {
         )}
         
         {/* 파일 업로드 버튼 */}
-        <label className={`w-full px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg transition flex items-center justify-center gap-2 mb-4 font-semibold shadow ${!serverConnected ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+        <label className={`w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-lg transition flex items-center justify-center gap-2 mb-4 font-semibold shadow ${!serverConnected ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
           <Upload size={18} />
           <span>{isUploading ? `업로드 중... ${Math.round(uploadProgress)}%` : '파일 업로드'}</span>
           <input
@@ -1043,7 +1047,7 @@ const CutFlowApp = () => {
           <div className="mb-4">
             <div className="w-full h-2 bg-gray-700 rounded overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all"
+                className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 transition-all"
                 style={{ width: `${uploadProgress}%` }}
               />
             </div>
@@ -1068,7 +1072,7 @@ const CutFlowApp = () => {
                   key={file.id} 
                   className={`p-3 rounded-lg transition transform cursor-pointer ${
                     selectedVideo === file.id 
-                      ? 'bg-blue-600 ring-2 ring-blue-400 scale-105' 
+                      ? 'bg-indigo-600 ring-2 ring-indigo-400 scale-105' 
                       : 'bg-gray-700 hover:bg-gray-600'
                   }`}
                   onClick={() => setSelectedVideo(file.id)}
@@ -1095,7 +1099,7 @@ const CutFlowApp = () => {
                       e.stopPropagation();
                       addFileToTimeline(file);
                     }}
-                    className="w-full px-2 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-semibold transition"
+                    className="w-full px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold transition"
                   >
                     타임라인에 추가
                   </button>
@@ -1108,7 +1112,7 @@ const CutFlowApp = () => {
 
       {/* 왼쪽 리사이즈 핸들 */}
       <div
-        className="w-1 bg-gray-700 hover:bg-blue-500 cursor-ew-resize transition-colors mt-16"
+        className="w-1 bg-gray-700 hover:bg-indigo-500 cursor-ew-resize transition-colors mt-16"
         onMouseDown={(e) => {
           e.preventDefault();
           setIsResizingLeft(true);
@@ -1125,14 +1129,13 @@ const CutFlowApp = () => {
                    aspectRatio: '16/9',
                    maxHeight: 'calc(100vh - 200px)'
                  }}>
-              {/* 편집 유도 UI - 비디오가 없을 때 */}
-              {!currentVideoFile && clips.filter(c => c.type === 'video').length === 0 && (
+              {/* 편집 유도 UI - 오브젝트가 없을 때 */}
+              {clips.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-900 bg-opacity-80">
                   <div className="text-center p-8">
                     <Video size={64} className="mx-auto mb-4 text-gray-400" />
-                    <h3 className="text-2xl font-bold text-white mb-2">비디오를 업로드하세요</h3>
-                    <p className="text-gray-300 mb-6">왼쪽 패널에서 파일을 업로드하여 편집을 시작하세요</p>
-                    <div className="flex flex-col gap-2 text-sm text-gray-400">
+                    <h3 className="text-2xl font-bold text-white mb-2">패널에서 파일을 업로드하여 편집을 시작하세요</h3>
+                    <div className="flex flex-col gap-2 text-sm text-gray-300">
                       <p>📹 비디오 파일 업로드</p>
                       <p>🎵 오디오 트랙 추가</p>
                       <p>✏️ 텍스트 오버레이</p>
@@ -1212,7 +1215,7 @@ const CutFlowApp = () => {
                         if (Math.abs(videoTime - loopedTime) > 0.5) {
                           e.target.currentTime = loopedTime;
                         }
-                        setCurrentTime(clipStart + relativeTime);
+                        setCurrentTime(Math.min(clipStart + relativeTime, duration));
                       } else {
                         // 일반 재생 - 클립이 끝나면 비디오만 멈추고, 전체 재생은 계속
                         const absoluteTime = clipStart + videoTime;
@@ -1220,7 +1223,7 @@ const CutFlowApp = () => {
                           e.target.pause();
                           // 전체 재생은 계속되므로 setIsPlaying(false) 제거
                         } else if (Math.abs(absoluteTime - currentTime) < 1) {
-                          setCurrentTime(absoluteTime);
+                          setCurrentTime(Math.min(absoluteTime, duration));
                         }
                       }
                     }
@@ -1330,26 +1333,101 @@ const CutFlowApp = () => {
               })}
 
               {/* 텍스트 오버레이 - 타임라인 클립 시간 범위 내에서만 표시 */}
-              {currentTexts.map(text => (
-                <div key={text.id} onClick={() => setSelectedText(text.id)} className={`absolute cursor-move select-none transition font-bold ${selectedText === text.id ? 'ring-2 ring-yellow-400 bg-yellow-400 bg-opacity-10 scale-110' : 'hover:scale-105'}`} style={{
-                  left: `${text.x}px`,
-                  top: `${text.y}px`,
-                  fontSize: `${text.fontSize}px`,
-                  color: text.color,
-                  fontFamily: text.fontFamily,
-                  textShadow: '3px 3px 6px rgba(0,0,0,0.9)',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  zIndex: 20
-                }} draggable onDragEnd={(e) => {
-                  const rect = e.currentTarget.parentElement.getBoundingClientRect();
-                  const newX = Math.max(0, Math.min(e.clientX - rect.left - 50, rect.width - 100));
-                  const newY = Math.max(0, Math.min(e.clientY - rect.top - 20, rect.height - 40));
-                  updateText(text.id, { x: newX, y: newY });
-                }}>
-                  {text.content}
-                </div>
-              ))}
+              {currentTexts.map(text => {
+                const isSelected = selectedText === text.id;
+                const isEditing = editingTextId === text.id;
+                
+                return (
+                  <div 
+                    key={text.id} 
+                    className={`absolute transition font-bold ${
+                      isSelected && !isEditing ? 'ring-2 ring-yellow-400 bg-yellow-400 bg-opacity-10' : ''
+                    } ${isEditing ? 'cursor-text' : 'cursor-move'}`}
+                    style={{
+                      left: `${text.x}px`,
+                      top: `${text.y}px`,
+                      fontSize: `${text.fontSize}px`,
+                      color: text.color,
+                      fontFamily: text.fontFamily,
+                      textShadow: '3px 3px 6px rgba(0,0,0,0.9)',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      zIndex: 20,
+                      outline: 'none'
+                    }}
+                    onClick={() => {
+                      if (!isEditing && !isDraggingText) {
+                        setSelectedText(text.id);
+                      }
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTextId(text.id);
+                      setSelectedText(text.id);
+                    }}
+                    onMouseDown={(e) => {
+                      if (isEditing) return;
+                      
+                      e.stopPropagation();
+                      setIsDraggingText(true);
+                      setSelectedText(text.id);
+                      
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const startTextX = text.x;
+                      const startTextY = text.y;
+                      const parentRect = e.currentTarget.parentElement.getBoundingClientRect();
+                      
+                      const handleMouseMove = (e2) => {
+                        const deltaX = e2.clientX - startX;
+                        const deltaY = e2.clientY - startY;
+                        const newX = Math.max(0, Math.min(startTextX + deltaX, parentRect.width - 100));
+                        const newY = Math.max(0, Math.min(startTextY + deltaY, parentRect.height - 40));
+                        updateText(text.id, { x: newX, y: newY });
+                      };
+                      
+                      const handleMouseUp = () => {
+                        setIsDraggingText(false);
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                      };
+                      
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                      document.body.style.cursor = 'grabbing';
+                      document.body.style.userSelect = 'none';
+                    }}
+                    contentEditable={isEditing}
+                    suppressContentEditableWarning={true}
+                    onBlur={(e) => {
+                      const newContent = e.target.textContent || '';
+                      if (newContent.trim()) {
+                        updateText(text.id, { content: newContent });
+                        // 타임라인 클립 이름도 업데이트
+                        const textClip = clips.find(c => c.type === 'text' && c.textId === text.id);
+                        if (textClip) {
+                          updateClip(textClip.id, { name: newContent });
+                        }
+                      }
+                      setEditingTextId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (isEditing && e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        e.target.blur();
+                      }
+                      if (isEditing && e.key === 'Escape') {
+                        e.target.textContent = text.content;
+                        e.target.blur();
+                      }
+                    }}
+                  >
+                    {text.content}
+                  </div>
+                );
+              })}
 
               {/* 재생 버튼 - 비디오가 업로드되고 일시정지 중일 때만 표시 */}
               {currentVideoFile && !isPlaying && (
@@ -1408,7 +1486,14 @@ const CutFlowApp = () => {
           </div>
 
             <div 
-              className={`${timelineWidth + 128 > (window.innerWidth || 1920) - leftPanelWidth - rightPanelWidth ? 'overflow-x-auto' : ''} ${tracks.length * 48 > 300 ? 'overflow-y-auto' : ''}`}
+              className={`${(() => {
+                // 실제 클립이 있는지 확인하고, 가장 오른쪽 클립의 endTime을 기준으로 스크롤 필요 여부 판단
+                if (clips.length === 0) return '';
+                const maxEndTime = Math.max(...clips.map(clip => clip.endTime));
+                const actualTimelineWidth = maxEndTime * pixelsPerSecond;
+                const availableWidth = (window.innerWidth || 1920) - leftPanelWidth - rightPanelWidth;
+                return actualTimelineWidth + 128 > availableWidth ? 'overflow-x-auto' : '';
+              })()} ${tracks.length * 48 > 300 ? 'overflow-y-auto' : ''}`}
               style={{ maxHeight: '300px' }}
             >
               <div className="flex" style={{ minWidth: `${timelineWidth + 128}px` }}>
@@ -1443,7 +1528,7 @@ const CutFlowApp = () => {
                           {trackClips.map(clip => (
                             <React.Fragment key={`time-guide-${clip.id}`}>
                               <div
-                                className="absolute top-0 bottom-0 w-0.5 bg-blue-400 opacity-40 z-5"
+                                className="absolute top-0 bottom-0 w-0.5 bg-indigo-400 opacity-40 z-5"
                                 style={{ left: `${clip.startTime * pixelsPerSecond}px` }}
                               />
                               <div
@@ -1505,7 +1590,7 @@ const CutFlowApp = () => {
                   {/* 드래그 중인 클립의 시간 가이드 라인 - 타임라인 전체 높이에 표시 (시간 마커 영역 포함) */}
                   {draggingClipTime !== null && (
                     <div
-                      className="absolute w-0.5 bg-green-400 z-26 opacity-80"
+                      className="absolute w-0.5 bg-indigo-400 z-26 opacity-80"
                       style={{ 
                         left: `${draggingClipTime * pixelsPerSecond}px`,
                         top: '-32px', // 시간 마커 영역까지 포함
@@ -1513,30 +1598,60 @@ const CutFlowApp = () => {
                         pointerEvents: 'none'
                       }}
                     >
-                      <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-green-400"></div>
-                      <div className="absolute top-1 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
+                      <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-indigo-400"></div>
+                      <div className="absolute top-1 left-1/2 transform -translate-x-1/2 bg-indigo-500 text-white text-xs px-2 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
                         {formatTime(draggingClipTime)}
                       </div>
                     </div>
                   )}
                   
                   {/* 리사이즈 중인 클립의 시간 가이드 라인 - 타임라인 전체 높이에 표시 (시간 마커 영역 포함) */}
-                  {resizingClipTime !== null && (
-                    <div
-                      className="absolute w-0.5 bg-orange-400 z-26 opacity-80"
-                      style={{ 
-                        left: `${resizingClipTime * pixelsPerSecond}px`,
-                        top: '-32px', // 시간 마커 영역까지 포함
-                        bottom: 0,
-                        pointerEvents: 'none'
-                      }}
-                    >
-                      <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-orange-400"></div>
-                      <div className="absolute top-1 left-1/2 transform -translate-x-1/2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
-                        {formatTime(resizingClipTime)}
-                      </div>
-                    </div>
-                  )}
+                  {resizingClipTime !== null && resizingClipId !== null && resizingSide !== null && (() => {
+                    const resizingClip = clips.find(c => c.id === resizingClipId);
+                    if (!resizingClip) return null;
+                    
+                    const currentStartTime = resizingSide === 'left' ? resizingClipTime : resizingClip.startTime;
+                    const currentEndTime = resizingSide === 'right' ? resizingClipTime : resizingClip.endTime;
+                    const clipDuration = currentEndTime - currentStartTime;
+                    
+                    return (
+                      <>
+                        {/* 리사이즈 중인 위치의 가이드 라인 */}
+                        <div
+                          className="absolute w-0.5 bg-orange-400 z-26 opacity-80"
+                          style={{ 
+                            left: `${resizingClipTime * pixelsPerSecond}px`,
+                            top: '-32px', // 시간 마커 영역까지 포함
+                            bottom: 0,
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-orange-400"></div>
+                          <div className="absolute top-1 left-1/2 transform -translate-x-1/2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
+                            {formatTime(resizingClipTime)}
+                          </div>
+                        </div>
+                        
+                        {/* 클립의 시작/끝 시간과 길이 정보 표시 */}
+                        <div
+                          className="absolute bg-orange-500 text-white text-xs px-3 py-1.5 rounded shadow-lg z-30 pointer-events-none"
+                          style={{
+                            top: '-60px',
+                            left: `${((currentStartTime + currentEndTime) / 2) * pixelsPerSecond}px`,
+                            transform: 'translateX(-50%)',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <div className="font-semibold">
+                            {formatTime(currentStartTime)} - {formatTime(currentEndTime)}
+                          </div>
+                          <div className="text-orange-100 text-xs mt-0.5">
+                            길이: {formatTime(clipDuration)}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1570,10 +1685,31 @@ const CutFlowApp = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            addClip(track.id, track.type);
+                            // 트랙 타입에 따라 적절한 기능 호출
+                            if (track.type === 'video' || track.type === 'audio' || track.type === 'image') {
+                              // 파일 선택 다이얼로그 열기
+                              const fileInput = document.createElement('input');
+                              fileInput.type = 'file';
+                              fileInput.multiple = true;
+                              fileInput.accept = track.type === 'video' ? 'video/*' : track.type === 'audio' ? 'audio/*' : 'image/*';
+                              fileInput.onchange = (event) => {
+                                if (event.target.files && event.target.files.length > 0) {
+                                  const fakeEvent = { target: { files: event.target.files } };
+                                  handleFileUpload(fakeEvent);
+                                }
+                              };
+                              fileInput.click();
+                            } else if (track.type === 'text') {
+                              // 텍스트 추가 기능 호출
+                              setShowTextInput(true);
+                            } else if (track.type === 'graphics') {
+                              // 효과 추가 기능은 사용자가 직접 선택하도록 유도
+                              // 여기서는 기본 효과 추가 (sparkles)
+                              addEffect('sparkles');
+                            }
                           }}
                           className="ml-auto p-1 hover:bg-gray-700 rounded transition"
-                          title="클립 추가"
+                          title={track.type === 'video' || track.type === 'audio' || track.type === 'image' ? '파일 추가' : track.type === 'text' ? '텍스트 추가' : '효과 추가'}
                         >
                           <Plus size={14} />
                         </button>
@@ -1663,7 +1799,7 @@ const CutFlowApp = () => {
                                 document.body.style.userSelect = 'none';
                               }}
                             >
-                              <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold">
+                              <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold relative">
                                 <span className="truncate flex-1">{clip.name}</span>
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs opacity-75">{formatTime(clip.startTime)}</span>
@@ -1680,6 +1816,26 @@ const CutFlowApp = () => {
                                     </button>
                                   )}
                                 </div>
+                                
+                                {/* 리사이즈 중일 때 클립 위에 시간 정보 표시 */}
+                                {resizingClipId === clip.id && resizingClipTime !== null && resizingSide !== null && (() => {
+                                  const currentStartTime = resizingSide === 'left' ? resizingClipTime : clip.startTime;
+                                  const currentEndTime = resizingSide === 'right' ? resizingClipTime : clip.endTime;
+                                  const clipDuration = currentEndTime - currentStartTime;
+                                  
+                                  return (
+                                    <div
+                                      className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-orange-500 text-white text-xs px-2 py-1 rounded shadow-lg z-40 pointer-events-none whitespace-nowrap"
+                                    >
+                                      <div className="font-semibold">
+                                        {formatTime(currentStartTime)} - {formatTime(currentEndTime)}
+                                      </div>
+                                      <div className="text-orange-100 text-xs mt-0.5 text-center">
+                                        길이: {formatTime(clipDuration)}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                               
                               {/* 리사이즈 핸들 */}
@@ -1691,6 +1847,11 @@ const CutFlowApp = () => {
                                       e.stopPropagation();
                                       const startX = e.clientX;
                                       const startTime = clip.startTime;
+                                      
+                                      // 리사이즈 시작 시점에 즉시 표시
+                                      setResizingClipId(clip.id);
+                                      setResizingClipTime(startTime);
+                                      setResizingSide('left');
                                       
                                       const handleMouseMove = (e2) => {
                                         const deltaX = (e2.clientX - startX) / pixelsPerSecond;
@@ -1706,7 +1867,9 @@ const CutFlowApp = () => {
                                         }
                                         
                                         // 리사이즈 중인 클립의 시간 표시
+                                        setResizingClipId(clip.id);
                                         setResizingClipTime(newTime);
+                                        setResizingSide('left');
                                         
                                         handleClipResize(clip.id, 'left', newTime);
                                       };
@@ -1714,6 +1877,8 @@ const CutFlowApp = () => {
                                       const handleMouseUp = () => {
                                         setSnapGuideTime(null);
                                         setResizingClipTime(null);
+                                        setResizingClipId(null);
+                                        setResizingSide(null);
                                         document.removeEventListener('mousemove', handleMouseMove);
                                         document.removeEventListener('mouseup', handleMouseUp);
                                       };
@@ -1729,6 +1894,11 @@ const CutFlowApp = () => {
                                       const startX = e.clientX;
                                       const startTime = clip.endTime;
                                       
+                                      // 리사이즈 시작 시점에 즉시 표시
+                                      setResizingClipId(clip.id);
+                                      setResizingClipTime(startTime);
+                                      setResizingSide('right');
+                                      
                                       const handleMouseMove = (e2) => {
                                         const deltaX = (e2.clientX - startX) / pixelsPerSecond;
                                         let newTime = startTime + deltaX;
@@ -1743,7 +1913,9 @@ const CutFlowApp = () => {
                                         }
                                         
                                         // 리사이즈 중인 클립의 시간 표시
+                                        setResizingClipId(clip.id);
                                         setResizingClipTime(newTime);
+                                        setResizingSide('right');
                                         
                                         handleClipResize(clip.id, 'right', newTime);
                                       };
@@ -1751,6 +1923,8 @@ const CutFlowApp = () => {
                                       const handleMouseUp = () => {
                                         setSnapGuideTime(null);
                                         setResizingClipTime(null);
+                                        setResizingClipId(null);
+                                        setResizingSide(null);
                                         document.removeEventListener('mousemove', handleMouseMove);
                                         document.removeEventListener('mouseup', handleMouseUp);
                                       };
@@ -1774,7 +1948,7 @@ const CutFlowApp = () => {
 
           {/* 컨트롤 버튼들 */}
           <div className="p-4 flex items-center justify-between">
-            <button onClick={togglePlay} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition flex items-center gap-2 font-semibold shadow">
+            <button onClick={togglePlay} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg transition flex items-center gap-2 font-semibold shadow">
               {isPlaying ? <Pause size={20} /> : <Play size={20} className="fill-white" />}
               <span>{isPlaying ? '일시정지' : '재생'}</span>
             </button>
@@ -1783,7 +1957,7 @@ const CutFlowApp = () => {
               {isExporting && (
                 <div className="w-full">
                   <div className="w-full h-2 bg-gray-700 rounded overflow-hidden mb-1">
-                    <div className="h-full bg-gradient-to-r from-green-500 to-green-400 transition-all" style={{ width: `${exportProgress}%` }} />
+                    <div className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 transition-all" style={{ width: `${exportProgress}%` }} />
                   </div>
                   <div className="text-xs text-gray-400 text-center">
                     처리 중... {exportProgress}%
@@ -1792,7 +1966,7 @@ const CutFlowApp = () => {
               )}
             </div>
 
-            <button onClick={handleExport} disabled={isExporting} className="px-6 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded-lg transition flex items-center gap-2 font-semibold shadow">
+            <button onClick={handleExport} disabled={isExporting} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition flex items-center gap-2 font-semibold shadow">
               {isExporting ? <div className="animate-spin">⚙️</div> : <Download size={20} />}
               <span>{isExporting ? '처리 중' : '내보내기'}</span>
             </button>
@@ -1802,7 +1976,7 @@ const CutFlowApp = () => {
 
       {/* 오른쪽 리사이즈 핸들 */}
       <div
-        className="w-1 bg-gray-700 hover:bg-blue-500 cursor-ew-resize transition-colors mt-16"
+        className="w-1 bg-gray-700 hover:bg-indigo-500 cursor-ew-resize transition-colors mt-16"
         onMouseDown={(e) => {
           e.preventDefault();
           setIsResizingRight(true);
@@ -1819,7 +1993,7 @@ const CutFlowApp = () => {
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">✏️ 텍스트 & 효과</h2>
           
           {/* 텍스트 추가 버튼 */}
-          <button onClick={() => setShowTextInput(!showTextInput)} className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 rounded-lg transition flex items-center justify-center gap-2 font-semibold shadow mb-3">
+          <button onClick={() => setShowTextInput(!showTextInput)} className="w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-lg transition flex items-center justify-center gap-2 font-semibold shadow mb-3">
             <Plus size={18} />
             <span>텍스트 추가</span>
           </button>
@@ -1836,7 +2010,7 @@ const CutFlowApp = () => {
                 autoFocus
               />
               <div className="flex gap-2">
-                <button onClick={addText} className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm transition font-semibold">
+                <button onClick={addText} className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm transition font-semibold">
                   추가
                 </button>
                 <button onClick={() => setShowTextInput(false)} className="flex-1 px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded text-sm transition font-semibold">
@@ -1852,14 +2026,14 @@ const CutFlowApp = () => {
             <div className="grid grid-cols-2 gap-2">
               <button 
                 onClick={() => addEffect('sparkles')} 
-                className="px-3 py-2 bg-gradient-to-r from-pink-600 to-pink-700 hover:from-pink-700 hover:to-pink-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
+                className="px-3 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
               >
                 <Sparkles size={16} />
                 <span>반짝임</span>
               </button>
               <button 
                 onClick={() => addEffect('zoom')} 
-                className="px-3 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
+                className="px-3 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
               >
                 <ZoomIn size={16} />
                 <span>줌</span>
@@ -1872,7 +2046,7 @@ const CutFlowApp = () => {
               </button>
               <button 
                 onClick={() => addEffect('blur')} 
-                className="px-3 py-2 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
+                className="px-3 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 rounded-lg transition flex items-center justify-center gap-2 text-sm font-semibold shadow"
               >
                 <span>블러</span>
               </button>
@@ -1903,7 +2077,7 @@ const CutFlowApp = () => {
                           <label className="text-gray-300 font-semibold">강도</label>
                           <span className="font-mono bg-gray-700 px-2 py-1 rounded">{effect.intensity}%</span>
                         </div>
-                        <input type="range" min="0" max="100" value={effect.intensity} onChange={(e) => updateEffect(effect.id, { intensity: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-pink-500" />
+                        <input type="range" min="0" max="100" value={effect.intensity} onChange={(e) => updateEffect(effect.id, { intensity: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-purple-500" />
                       </div>
                     </div>
                   )}
@@ -1919,7 +2093,7 @@ const CutFlowApp = () => {
             </div>
           ) : (
             texts.map(text => (
-              <div key={text.id} className={`p-4 rounded-lg transition cursor-pointer border-2 ${selectedText === text.id ? 'bg-blue-600 border-blue-400 shadow-lg' : 'bg-gray-700 border-gray-600 hover:bg-gray-600'}`} onClick={() => setSelectedText(text.id)}>
+              <div key={text.id} className={`p-4 rounded-lg transition cursor-pointer border-2 ${selectedText === text.id ? 'bg-indigo-600 border-indigo-400 shadow-lg' : 'bg-gray-700 border-gray-600 hover:bg-gray-600'}`} onClick={() => setSelectedText(text.id)}>
                 <div className="flex items-start justify-between mb-3">
                   <p className="text-sm font-bold truncate flex-1">{text.content}</p>
                   <button onClick={(e) => { e.stopPropagation(); deleteText(text.id); }} className="ml-2 p-1 hover:bg-red-600 rounded transition" title="삭제">
@@ -1934,7 +2108,7 @@ const CutFlowApp = () => {
                         <label className="text-gray-300 font-semibold">📏 크기</label>
                         <span className="font-mono bg-gray-700 px-2 py-1 rounded">{text.fontSize}px</span>
                       </div>
-                      <input type="range" min="12" max="120" value={text.fontSize} onChange={(e) => updateText(text.id, { fontSize: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-blue-500" />
+                      <input type="range" min="12" max="120" value={text.fontSize} onChange={(e) => updateText(text.id, { fontSize: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-indigo-500" />
                     </div>
 
                     <div>
@@ -1962,7 +2136,7 @@ const CutFlowApp = () => {
                         <label className="text-gray-300 font-semibold">📍 위치 X</label>
                         <span className="font-mono bg-gray-700 px-2 py-1 rounded">{text.x}px</span>
                       </div>
-                      <input type="range" min="0" max="800" value={text.x} onChange={(e) => updateText(text.id, { x: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-blue-500" />
+                      <input type="range" min="0" max="800" value={text.x} onChange={(e) => updateText(text.id, { x: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-indigo-500" />
                     </div>
 
                     <div>
@@ -1970,7 +2144,7 @@ const CutFlowApp = () => {
                         <label className="text-gray-300 font-semibold">📍 위치 Y</label>
                         <span className="font-mono bg-gray-700 px-2 py-1 rounded">{text.y}px</span>
                       </div>
-                      <input type="range" min="0" max="400" value={text.y} onChange={(e) => updateText(text.id, { y: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-blue-500" />
+                      <input type="range" min="0" max="400" value={text.y} onChange={(e) => updateText(text.id, { y: parseInt(e.target.value) })} className="w-full h-2 bg-gray-700 rounded appearance-none cursor-pointer accent-indigo-500" />
                     </div>
                   </div>
                 )}

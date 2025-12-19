@@ -1802,7 +1802,6 @@ const CutFlowApp = () => {
                               <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold relative">
                                 <span className="truncate flex-1">{clip.name}</span>
                                 <div className="flex items-center gap-1">
-                                  <span className="text-xs opacity-75">{formatTime(clip.startTime)}</span>
                                   {isSelected && (
                                     <button
                                       onClick={(e) => {

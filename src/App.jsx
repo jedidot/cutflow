@@ -4,18 +4,20 @@ import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Spark
 const CutFlowApp = () => {
   // 프로덕션 환경에서는 HTTPS 강제 사용
   const getApiBaseUrl = () => {
-    // 환경 변수가 있으면 우선 사용
-    if (import.meta.env.VITE_API_BASE_URL) {
-      return import.meta.env.VITE_API_BASE_URL;
-    }
-    
-    // 프로덕션 환경 (Vercel 배포)에서는 HTTPS 사용
-    if (import.meta.env.PROD || window.location.hostname !== 'localhost') {
-      return 'https://106.254.252.42:3443';
-    }
-    
     // 로컬 개발 환경
-    return 'http://localhost:3001';
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+    }
+    
+    // 프로덕션 환경 (Vercel 배포)에서는 무조건 HTTPS 사용
+    // 환경 변수가 HTTPS로 시작하지 않으면 무시하고 HTTPS 사용
+    const envUrl = import.meta.env.VITE_API_BASE_URL;
+    if (envUrl && envUrl.startsWith('https://')) {
+      return envUrl;
+    }
+    
+    // 프로덕션에서는 무조건 HTTPS
+    return 'https://106.254.252.42:3443';
   };
   
   const API_BASE_URL = getApiBaseUrl();

@@ -2,10 +2,23 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Sparkles, Type, ZoomIn, ZoomOut } from 'lucide-react';
 
 const CutFlowApp = () => {
-  // 프로덕션 환경에서는 HTTPS 사용, 로컬에서는 환경 변수 또는 localhost
-  const API_BASE_URL = import.meta.env.PROD 
-    ? (import.meta.env.VITE_API_BASE_URL || 'https://106.254.252.42:3443')
-    : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001');
+  // 프로덕션 환경에서는 HTTPS 강제 사용
+  const getApiBaseUrl = () => {
+    // 환경 변수가 있으면 우선 사용
+    if (import.meta.env.VITE_API_BASE_URL) {
+      return import.meta.env.VITE_API_BASE_URL;
+    }
+    
+    // 프로덕션 환경 (Vercel 배포)에서는 HTTPS 사용
+    if (import.meta.env.PROD || window.location.hostname !== 'localhost') {
+      return 'https://106.254.252.42:3443';
+    }
+    
+    // 로컬 개발 환경
+    return 'http://localhost:3001';
+  };
+  
+  const API_BASE_URL = getApiBaseUrl();
   
   const [currentPage, setCurrentPage] = useState('login');
   const [user, setUser] = useState(null);

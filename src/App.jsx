@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Sparkles, Type, ZoomIn, ZoomOut } from 'lucide-react';
 
 const CutFlowApp = () => {
-  const API_BASE_URL = 'http://localhost:3001';
+  // 환경 변수 확인 및 로그 (디버깅용)
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+  console.log('🔍 API_BASE_URL:', API_BASE_URL, '| Env:', import.meta.env.VITE_API_BASE_URL);
   
   const [currentPage, setCurrentPage] = useState('login');
   const [user, setUser] = useState(null);

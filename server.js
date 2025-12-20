@@ -6,16 +6,48 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import https from 'https';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+// eslint-disable-next-line no-undef
+const PORT = process.env.PORT || 3001;
+// eslint-disable-next-line no-undef
+const HOST = process.env.HOST || '0.0.0.0'; // 모든 인터페이스에서 접근 가능하도록
 
-// 미들웨어
-app.use(cors());
+// CORS 설정 - 특정 origin 허용
+const allowedOrigins = [
+  'https://cutflow.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5174'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // origin이 없는 경우 (같은 도메인에서의 요청) 허용
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      // 개발 환경에서는 모든 origin 허용 (선택사항)
+      // eslint-disable-next-line no-undef
+      if (process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS 정책에 의해 차단되었습니다.'));
+      }
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
 // 업로드 폴더 생성
@@ -105,8 +137,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
           `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${file.path}"`
         );
         duration = Math.floor(parseFloat(stdout.trim()) || 0);
-      } catch (err) {
-        console.error('비디오 길이 가져오기 실패:', err);
+      } catch (error) {
+        console.error('비디오 길이 가져오기 실패:', error);
         duration = 30; // 기본값
       }
     } else if (file.mimetype.startsWith('audio/')) {
@@ -117,8 +149,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
           `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${file.path}"`
         );
         duration = Math.floor(parseFloat(stdout.trim()) || 0);
-      } catch (err) {
-        console.error('오디오 길이 가져오기 실패:', err);
+      } catch (error) {
+        console.error('오디오 길이 가져오기 실패:', error);
         duration = 30; // 기본값
       }
     } else if (file.mimetype.startsWith('image/')) {
@@ -163,7 +195,7 @@ app.post('/api/upload/multiple', upload.array('files', 10), async (req, res) => 
               `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${file.path}"`
             );
             duration = Math.floor(parseFloat(stdout.trim()) || 0);
-          } catch (err) {
+          } catch {
             duration = 30;
           }
         } else if (file.mimetype.startsWith('audio/')) {
@@ -173,7 +205,7 @@ app.post('/api/upload/multiple', upload.array('files', 10), async (req, res) => 
               `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${file.path}"`
             );
             duration = Math.floor(parseFloat(stdout.trim()) || 0);
-          } catch (err) {
+          } catch {
             duration = 30;
           }
         } else if (file.mimetype.startsWith('image/')) {
@@ -277,7 +309,7 @@ app.delete('/api/files/:filename', (req, res) => {
 // 비디오 내보내기
 app.post('/api/export', async (req, res) => {
   try {
-    const { clips, texts, duration } = req.body;
+    const { clips, duration } = req.body;
     
     if (!clips || clips.length === 0) {
       return res.status(400).json({ error: '편집할 클립이 없습니다.' });
@@ -307,7 +339,6 @@ app.post('/api/export', async (req, res) => {
         
         ffmpegInputs.push(`-i "${filePath}"`);
         
-        const clipDuration = clip.endTime - clip.startTime;
         let filter = '';
         
         if (clip.type === 'image') {
@@ -405,10 +436,42 @@ app.post('/api/export', async (req, res) => {
   }
 });
 
-// 서버 시작
-app.listen(PORT, () => {
-  console.log(`🚀 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
-  console.log(`📁 업로드 폴더: ${uploadsDir}`);
-  console.log(`📁 출력 폴더: ${outputDir}`);
+// 헬스 체크 엔드포인트
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// 서버 시작
+// HTTPS 인증서 파일 경로 확인
+const keyPath = path.join(__dirname, '106.254.252.42+2-key.pem');
+const certPath = path.join(__dirname, '106.254.252.42+2.pem');
+
+// HTTPS 인증서가 있으면 HTTPS 서버 시작, 없으면 HTTP 서버만 시작
+if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+  const httpsOptions = {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath)
+  };
+  
+  https.createServer(httpsOptions, app).listen(3443, HOST, () => {
+    console.log(`🚀 HTTPS 서버가 https://${HOST}:3443 에서 실행 중입니다.`);
+    console.log(`📁 업로드 폴더: ${uploadsDir}`);
+    console.log(`📁 출력 폴더: ${outputDir}`);
+    console.log(`🌐 허용된 Origin: ${allowedOrigins.join(', ')}`);
+  });
+  
+  // HTTP 서버도 함께 실행 (포트 3001)
+  app.listen(PORT, HOST, () => {
+    console.log(`🚀 HTTP 서버가 http://${HOST}:${PORT} 에서 실행 중입니다.`);
+  });
+} else {
+  // HTTPS 인증서가 없으면 HTTP만 실행
+  app.listen(PORT, HOST, () => {
+    console.log(`🚀 서버가 http://${HOST}:${PORT} 에서 실행 중입니다.`);
+    console.log(`📁 업로드 폴더: ${uploadsDir}`);
+    console.log(`📁 출력 폴더: ${outputDir}`);
+    console.log(`🌐 허용된 Origin: ${allowedOrigins.join(', ')}`);
+    console.log(`⚠️  HTTPS 인증서가 없어 HTTP만 실행 중입니다.`);
+    console.log(`💡 HTTPS를 사용하려면 mkcert로 인증서를 생성하세요.`);
+  });
+}

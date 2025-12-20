@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Sparkles, Type, ZoomIn, ZoomOut } from 'lucide-react';
 
 const CutFlowApp = () => {
-  // 환경 변수 확인 및 로그 (디버깅용)
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
-  console.log('🔍 API_BASE_URL:', API_BASE_URL, '| Env:', import.meta.env.VITE_API_BASE_URL);
   
   const [currentPage, setCurrentPage] = useState('login');
   const [user, setUser] = useState(null);
@@ -1346,14 +1344,14 @@ const CutFlowApp = () => {
                       isSelected && !isEditing ? 'ring-2 ring-yellow-400 bg-yellow-400 bg-opacity-10' : ''
                     } ${isEditing ? 'cursor-text' : 'cursor-move'}`}
                     style={{
-                      left: `${text.x}px`,
-                      top: `${text.y}px`,
-                      fontSize: `${text.fontSize}px`,
-                      color: text.color,
-                      fontFamily: text.fontFamily,
-                      textShadow: '3px 3px 6px rgba(0,0,0,0.9)',
-                      padding: '6px 12px',
-                      borderRadius: '6px',
+                  left: `${text.x}px`,
+                  top: `${text.y}px`,
+                  fontSize: `${text.fontSize}px`,
+                  color: text.color,
+                  fontFamily: text.fontFamily,
+                  textShadow: '3px 3px 6px rgba(0,0,0,0.9)',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
                       zIndex: 20,
                       outline: 'none'
                     }}
@@ -1385,7 +1383,7 @@ const CutFlowApp = () => {
                         const deltaY = e2.clientY - startY;
                         const newX = Math.max(0, Math.min(startTextX + deltaX, parentRect.width - 100));
                         const newY = Math.max(0, Math.min(startTextY + deltaY, parentRect.height - 40));
-                        updateText(text.id, { x: newX, y: newY });
+                  updateText(text.id, { x: newX, y: newY });
                       };
                       
                       const handleMouseUp = () => {
@@ -1426,8 +1424,8 @@ const CutFlowApp = () => {
                       }
                     }}
                   >
-                    {text.content}
-                  </div>
+                  {text.content}
+                </div>
                 );
               })}
 

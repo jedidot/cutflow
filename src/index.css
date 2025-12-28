@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 /* 로그인 화면이 다른 요소에 가려지지 않도록 */
 body {
@@ -10,4 +8,16 @@ body {
 
 #root {
   position: relative;
+}
+
+/* 반짝임 효과 애니메이션 */
+@keyframes sparklePulse {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

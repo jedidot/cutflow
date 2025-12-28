@@ -1,5 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, Play, Pause, Download, Trash2, Plus, Image, Music, Video, Sparkles, Type, ZoomIn, ZoomOut } from 'lucide-react';
+import { 
+  initDB, 
+  saveFileToDB, 
+  getFilesFromDB, 
+  deleteFileFromDB, 
+  getFileFromDB,
+  getStorageUsage 
+} from './utils/indexedDB';
+import { getMediaDuration, initFFmpeg, exportVideo } from './utils/ffmpegClient';
 
 const CutFlowApp = () => {
   // 프로덕션 환경에서는 HTTPS 강제 사용
@@ -49,6 +58,15 @@ const CutFlowApp = () => {
   const [exportProgress, setExportProgress] = useState(0);
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('demo1234');
+  
+  // 원격 서버 설정 상태 (HTTP 업로드)
+  const [showRemoteServerSettings, setShowRemoteServerSettings] = useState(false);
+  const [remoteServerConfig, setRemoteServerConfig] = useState({
+    url: '',
+    apiKey: '',
+    enabled: false
+  });
+  const [remoteServerTesting, setRemoteServerTesting] = useState(false);
 
   // 타임라인 상태
   const [tracks] = useState([
@@ -125,16 +143,48 @@ const CutFlowApp = () => {
     }
   };
 
-  // 미디어 파일 목록 로드
+  // 미디어 파일 목록 가져오기 (IndexedDB에서)
+  const loadMediaFiles = async () => {
+    try {
+      // IndexedDB 초기화
+      await initDB();
+      
+      // IndexedDB에서 파일 목록 가져오기
+      const files = await getFilesFromDB();
+      
+      // 파일 형식 변환 (서버 응답과 호환되도록)
+      const formattedFiles = files.map(file => ({
+        id: file.id,
+        filename: file.filename || file.originalName,
+        originalName: file.originalName,
+        path: file.url, // Blob URL 사용
+        size: file.size,
+        type: file.type,
+        duration: file.duration || 0,
+        mimetype: file.mimetype,
+        url: file.url // 미리보기용 URL
+      }));
+      
+      setMediaFiles(formattedFiles);
+      setServerConnected(true); // 로컬 저장소는 항상 사용 가능
+    } catch (error) {
+      console.error('파일 목록 로드 실패:', error);
+      setServerConnected(false);
+      // 빈 배열로 설정하여 앱이 계속 작동하도록 함
+      setMediaFiles([]);
+    }
+  };
+
+  // 미디어 파일 목록 로드 (IndexedDB에서)
   useEffect(() => {
     if (currentPage === 'dashboard') {
-      checkServerConnection().then(connected => {
-        if (connected) {
-          loadMediaFiles().catch(err => {
-            console.error('파일 목록 로드 실패:', err);
-          });
-        }
-      });
+      // 약간의 지연을 두어 컴포넌트가 완전히 마운트된 후 실행
+      const timer = setTimeout(() => {
+        loadMediaFiles().catch(err => {
+          console.error('파일 목록 로드 실패:', err);
+        });
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [currentPage]);
 
@@ -156,40 +206,20 @@ const CutFlowApp = () => {
     return () => clearInterval(interval);
   }, [isPlaying, duration]);
 
-  // 미디어 파일 목록 가져오기
-  const loadMediaFiles = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/files`);
-      if (!response.ok) {
-        throw new Error(`서버 응답 오류: ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.files) {
-        setMediaFiles(data.files);
-      }
-    } catch (error) {
-      console.error('파일 목록 로드 실패:', error);
-      // 네트워크 오류인 경우 서버가 실행 중이 아닐 수 있음
-      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        console.warn('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.');
-      }
-      throw error;
-    }
-  };
 
-  // 파일 삭제
+  // 파일 삭제 (IndexedDB에서)
   const handleDeleteFile = async (file) => {
     if (!window.confirm(`"${file.originalName || file.filename}" 파일을 삭제하시겠습니까?`)) {
       return;
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${file.filename}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error('파일 삭제 실패');
+      // IndexedDB에서 파일 삭제
+      await deleteFileFromDB(file.id);
+      
+      // Blob URL 해제
+      if (file.url) {
+        URL.revokeObjectURL(file.url);
       }
 
       // 파일 목록에서 제거
@@ -220,7 +250,7 @@ const CutFlowApp = () => {
     }
   };
 
-  // 파일 업로드
+  // 파일 업로드 (IndexedDB에 저장)
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -229,125 +259,153 @@ const CutFlowApp = () => {
     setUploadProgress(0);
 
     try {
-      const formData = new FormData();
-      files.forEach(file => {
-        formData.append('files', file);
-      });
-
-      const xhr = new XMLHttpRequest();
+      // 초기화 단계 (5%)
+      setUploadProgress(5);
+      await initDB();
       
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const percentComplete = (e.loaded / e.total) * 100;
-          setUploadProgress(percentComplete);
-        }
-      });
-
-      xhr.addEventListener('load', async () => {
-        if (xhr.status === 200) {
+      setUploadProgress(10);
+      // FFmpeg 초기화는 백그라운드에서 진행 (duration 추출 시 필요할 때만)
+      let ffmpegInitialized = false;
+      const initFFmpegIfNeeded = async () => {
+        if (!ffmpegInitialized) {
           try {
-            const data = JSON.parse(xhr.responseText);
-            setServerConnected(true); // 업로드 성공 시 서버 연결 상태 업데이트
-            await loadMediaFiles();
+            await initFFmpeg();
+            ffmpegInitialized = true;
+          } catch (ffmpegError) {
+            console.warn('FFmpeg 초기화 실패 (기본 duration 사용):', ffmpegError);
+          }
+        }
+      };
+
+      const uploadedFiles = [];
+      const totalFiles = files.length;
+      const progressPerFile = 80 / totalFiles; // 10% ~ 90% 구간을 파일 처리에 사용
+
+      // 각 파일을 순차적으로 처리
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileStartProgress = 10 + (i * progressPerFile);
+        setUploadProgress(fileStartProgress);
+
+        try {
+          // 파일 타입 확인
+          let fileType = 'unknown';
+          if (file.type.startsWith('video/')) fileType = 'video';
+          else if (file.type.startsWith('audio/')) fileType = 'audio';
+          else if (file.type.startsWith('image/')) fileType = 'image';
+
+          // Duration 추출 (진행률 업데이트)
+          setUploadProgress(fileStartProgress + progressPerFile * 0.2);
+          let fileDuration = 0;
+          try {
+            // FFmpeg 초기화 (필요 시)
+            await initFFmpegIfNeeded();
+            setUploadProgress(fileStartProgress + progressPerFile * 0.4);
             
-            // 업로드된 파일들을 타임라인에 자동 추가
-            if (data.files && data.files.length > 0) {
-              setClips(prev => {
-                let lastEndTime = currentTime;
-                const newClips = [];
-                let firstVideoClipId = null;
-                let maxDuration = duration;
+            // Duration 추출 (MediaElement 사용 - 더 빠름)
+            fileDuration = await getMediaDuration(file);
+          } catch (durationError) {
+            console.warn('Duration 추출 실패, 기본값 사용:', durationError);
+            // 기본값 설정
+            if (fileType === 'image') fileDuration = 5;
+            else fileDuration = 30;
+          }
 
-                data.files.forEach((file) => {
-                  let trackId = 'video';
-                  if (file.type === 'audio') trackId = 'audio';
-                  else if (file.type === 'image') trackId = 'image';
-                  else if (file.type === 'video') trackId = 'video';
+          // IndexedDB에 저장 (진행률 업데이트)
+          setUploadProgress(fileStartProgress + progressPerFile * 0.6);
+          const savedFile = await saveFileToDB(file, {
+            type: fileType,
+            duration: fileDuration
+          });
 
-                  const newClip = {
-                    id: Date.now() + Math.random() * 1000,
-                    trackId,
-                    startTime: lastEndTime,
-                    endTime: lastEndTime + (file.duration || 10),
-                    name: file.originalName || file.filename,
-                    type: file.type,
-                    path: file.path,
-                    fileId: file.id
-                  };
+          setUploadProgress(fileStartProgress + progressPerFile * 0.9);
 
-                  newClips.push(newClip);
-                  lastEndTime = newClip.endTime;
-                  
-                  // 비디오인 경우 duration 업데이트 및 첫 번째 비디오 선택
-                  if (file.type === 'video' && file.duration) {
-                    maxDuration = Math.max(maxDuration, file.duration);
-                    if (!firstVideoClipId) {
-                      firstVideoClipId = newClip.id;
-                    }
-                  }
-                });
+          uploadedFiles.push({
+            id: savedFile.id,
+            filename: savedFile.filename,
+            originalName: savedFile.originalName,
+            path: savedFile.url || URL.createObjectURL(new Blob([savedFile.data], { type: savedFile.mimetype })),
+            size: savedFile.size,
+            type: savedFile.type,
+            duration: savedFile.duration,
+            mimetype: savedFile.mimetype,
+            url: savedFile.url
+          });
+        } catch (fileError) {
+          console.error(`파일 ${file.name} 업로드 실패:`, fileError);
+          // 개별 파일 실패해도 계속 진행
+        }
+      }
 
-                // duration 업데이트
-                if (maxDuration > duration) {
-                  setDuration(maxDuration);
-                }
+      // 파일 목록 새로고침 (90%)
+      setUploadProgress(90);
+      await loadMediaFiles();
+      
+      // 업로드된 파일들을 타임라인에 자동 추가
+      if (uploadedFiles.length > 0) {
+        setClips(prev => {
+          let lastEndTime = currentTime;
+          const newClips = [];
+          let firstVideoClipId = null;
+          let maxDuration = duration;
 
-                // 첫 번째 비디오 클립 선택
-                if (firstVideoClipId) {
-                  setTimeout(() => {
-                    setSelectedClip(firstVideoClipId);
-                    const firstVideoFile = data.files.find(f => f.type === 'video');
-                    if (firstVideoFile) {
-                      setSelectedVideo(firstVideoFile.id);
-                    }
-                  }, 100);
-                }
+          uploadedFiles.forEach((file) => {
+            let trackId = 'video';
+            if (file.type === 'audio') trackId = 'audio';
+            else if (file.type === 'image') trackId = 'image';
+            else if (file.type === 'video') trackId = 'video';
 
-                return [...prev, ...newClips];
-              });
+            const newClip = {
+              id: Date.now() + Math.random() * 1000,
+              trackId,
+              startTime: lastEndTime,
+              endTime: lastEndTime + (file.duration || 10),
+              name: file.originalName || file.filename,
+              type: file.type,
+              path: file.path,
+              fileId: file.id
+            };
+
+            newClips.push(newClip);
+            lastEndTime = newClip.endTime;
+            
+            // 비디오인 경우 duration 업데이트 및 첫 번째 비디오 선택
+            if (file.type === 'video' && file.duration) {
+              maxDuration = Math.max(maxDuration, file.duration);
+              if (!firstVideoClipId) {
+                firstVideoClipId = newClip.id;
+              }
             }
-            
-            setIsUploading(false);
-            setUploadProgress(0);
-            alert(`✅ ${data.files.length}개 파일 업로드 완료!\n타임라인에 자동으로 추가되었습니다.`);
-          } catch (err) {
-            console.error('응답 파싱 오류:', err);
-            setIsUploading(false);
-            setUploadProgress(0);
-            alert('❌ 업로드 응답 처리 중 오류가 발생했습니다.');
+          });
+
+          // duration 업데이트
+          if (maxDuration > duration) {
+            setDuration(maxDuration);
           }
-        } else {
-          setIsUploading(false);
-          setUploadProgress(0);
-          let errorMsg = '업로드 실패';
-          try {
-            const errorData = JSON.parse(xhr.responseText);
-            errorMsg = errorData.error || errorMsg;
-          } catch {
-            errorMsg = xhr.statusText || errorMsg;
+
+          // 첫 번째 비디오 클립 선택
+          if (firstVideoClipId) {
+            setTimeout(() => {
+              setSelectedClip(firstVideoClipId);
+              const firstVideoFile = uploadedFiles.find(f => f.type === 'video');
+              if (firstVideoFile) {
+                setSelectedVideo(firstVideoFile.id);
+              }
+            }, 100);
           }
-          alert(`❌ 업로드 실패 (${xhr.status}): ${errorMsg}`);
-        }
-      });
 
-      xhr.addEventListener('error', (e) => {
-        setIsUploading(false);
-        setUploadProgress(0);
-        console.error('업로드 에러:', e);
-        alert(`❌ 업로드 중 오류가 발생했습니다.\n\n서버가 실행 중인지 확인해주세요.\n서버 주소: ${API_BASE_URL}\n\n터미널에서 다음 명령어로 서버를 실행하세요:\nnpm run dev:server`);
-      });
-
-      xhr.addEventListener('abort', () => {
-        setIsUploading(false);
-        setUploadProgress(0);
-      });
-
-      xhr.open('POST', `${API_BASE_URL}/api/upload/multiple`);
-      xhr.send(formData);
+          return [...prev, ...newClips];
+        });
+      }
+      
+      setIsUploading(false);
+      setUploadProgress(0);
+      alert(`✅ ${uploadedFiles.length}개 파일 업로드 완료!\n타임라인에 자동으로 추가되었습니다.`);
     } catch (error) {
       console.error('업로드 오류:', error);
       setIsUploading(false);
-      alert('❌ 업로드 중 오류가 발생했습니다.');
+      setUploadProgress(0);
+      alert(`❌ 업로드 중 오류가 발생했습니다.\n\n${error.message}`);
     }
   };
 
@@ -409,12 +467,12 @@ const CutFlowApp = () => {
 
   const currentVideoClip = getCurrentVideoClip();
   const currentVideoFile = currentVideoClip 
-    ? mediaFiles.find(f => f.path === currentVideoClip.path || f.id === currentVideoClip.fileId)
+    ? mediaFiles.find(f => f.id === currentVideoClip.fileId || f.path === currentVideoClip.path)
     : null;
 
   const currentImageClip = getCurrentImageClip();
   const currentImageFile = currentImageClip 
-    ? mediaFiles.find(f => f.path === currentImageClip.path || f.id === currentImageClip.fileId)
+    ? mediaFiles.find(f => f.id === currentImageClip.fileId || f.path === currentImageClip.path)
     : null;
 
   const handleLogin = (e) => {
@@ -444,64 +502,81 @@ const CutFlowApp = () => {
 
   const currentAudioClip = getCurrentAudioClip();
   const currentAudioFile = currentAudioClip 
-    ? mediaFiles.find(f => f.path === currentAudioClip.path || f.id === currentAudioClip.fileId)
+    ? mediaFiles.find(f => f.id === currentAudioClip.fileId || f.path === currentAudioClip.path)
     : null;
 
-  // 현재 재생 중인 효과 찾기
-  const getCurrentEffects = () => {
+  // 현재 재생 중인 효과 찾기 (메모이제이션)
+  const currentEffects = useMemo(() => {
     return effects.filter(effect => 
       currentTime >= effect.startTime && currentTime < effect.endTime
     );
-  };
+  }, [effects, currentTime]);
 
-  // 현재 재생 중인 텍스트 찾기 (타임라인 클립 기반)
-  const getCurrentTexts = () => {
+  // 현재 재생 중인 텍스트 찾기 (타임라인 클립 기반, 메모이제이션)
+  const currentTexts = useMemo(() => {
     return texts.filter(text => {
       const textClip = clips.find(c => c.type === 'text' && c.textId === text.id);
       if (!textClip) return false;
       return currentTime >= textClip.startTime && currentTime < textClip.endTime;
     });
-  };
-
-  const currentEffects = getCurrentEffects();
-  const currentTexts = getCurrentTexts();
+  }, [texts, clips, currentTime]);
 
   // 반짝임 효과 파티클 생성 및 업데이트
   const [sparkleParticles, setSparkleParticles] = useState({});
   
   useEffect(() => {
     const sparkleEffects = currentEffects.filter(e => e.type === 'sparkles');
-    const newParticles = {};
     
-    sparkleEffects.forEach(effect => {
-      const intensity = effect.intensity / 100;
-      const particleCount = Math.floor(intensity * 20);
+    // 파티클이 실제로 변경되었는지 확인
+    setSparkleParticles(prevParticles => {
+      const newParticles = {};
+      let hasChanges = false;
       
-      // 파티클이 없거나 개수가 변경되면 새로 생성
-      if (!sparkleParticles[effect.id] || sparkleParticles[effect.id].length !== particleCount) {
-        newParticles[effect.id] = Array.from({ length: particleCount }, (_, i) => ({
-          id: i,
-          left: Math.random() * 100,
-          top: Math.random() * 100,
-          delay: Math.random() * 2,
-          duration: 1 + Math.random(),
-          opacity: intensity * 0.8
-        }));
-      } else {
-        // 기존 파티클 유지
-        newParticles[effect.id] = sparkleParticles[effect.id];
+      sparkleEffects.forEach(effect => {
+        const intensity = (effect.intensity || 50) / 100;
+        // 강도에 따라 파티클 개수 조정 (최소 5개, 최대 50개)
+        const particleCount = Math.max(5, Math.floor(intensity * 50));
+        
+        // 파티클이 없거나 개수가 변경되면 새로 생성
+        if (!prevParticles[effect.id] || prevParticles[effect.id].length !== particleCount) {
+          hasChanges = true;
+          newParticles[effect.id] = Array.from({ length: particleCount }, (_, i) => ({
+            id: i,
+            left: Math.random() * 100,
+            top: Math.random() * 100,
+            delay: Math.random() * 0.5, // 지연 시간을 0~0.5초로 줄임 (즉시 표시)
+            duration: 0.8 + Math.random() * 0.4, // 0.8~1.2초로 짧게
+            opacity: 0.5 + (intensity * 0.5) // 0.5 ~ 1.0
+          }));
+        } else {
+          // 기존 파티클 유지하되, opacity 업데이트
+          newParticles[effect.id] = prevParticles[effect.id].map(p => ({
+            ...p,
+            opacity: 0.5 + (intensity * 0.5)
+          }));
+          hasChanges = true;
+        }
+      });
+      
+      // 더 이상 활성화되지 않은 효과의 파티클 제거
+      Object.keys(prevParticles).forEach(effectId => {
+        if (!sparkleEffects.find(e => e.id.toString() === effectId)) {
+          hasChanges = true;
+          // 제거 (newParticles에 추가하지 않음)
+        } else if (!newParticles[effectId]) {
+          // 기존 파티클이 있으면 유지
+          newParticles[effectId] = prevParticles[effectId];
+        }
+      });
+      
+      // 변경사항이 없으면 이전 상태 반환 (불필요한 리렌더링 방지)
+      if (!hasChanges && Object.keys(newParticles).length === Object.keys(prevParticles).length) {
+        return prevParticles;
       }
+      
+      return newParticles;
     });
-    
-    // 더 이상 활성화되지 않은 효과의 파티클 제거
-    Object.keys(sparkleParticles).forEach(effectId => {
-      if (!sparkleEffects.find(e => e.id.toString() === effectId)) {
-        delete newParticles[effectId];
-      }
-    });
-    
-    setSparkleParticles(newParticles);
-  }, [currentEffects, currentTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentEffects]);
 
   // 비디오 재생 제어 (반복 재생 지원)
   useEffect(() => {
@@ -634,6 +709,83 @@ const CutFlowApp = () => {
     setSelectedText(null);
   };
 
+  // 원격 서버 연결 테스트
+  const testRemoteServer = async () => {
+    if (!remoteServerConfig.url) {
+      alert('⚠️ 원격 서버 URL을 입력해주세요.');
+      return;
+    }
+
+    setRemoteServerTesting(true);
+    try {
+      // 원격 서버가 헬스 체크 엔드포인트를 제공한다고 가정
+      const testUrl = `${remoteServerConfig.url}/api/health`;
+      const headers = {};
+      
+      if (remoteServerConfig.apiKey) {
+        headers['Authorization'] = `Bearer ${remoteServerConfig.apiKey}`;
+      }
+
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers: headers
+      });
+
+      if (response.ok) {
+        alert('✅ 원격 서버 연결 성공!');
+        setRemoteServerConfig({ ...remoteServerConfig, enabled: true });
+      } else {
+        alert(`❌ 원격 서버 연결 실패: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('원격 서버 테스트 오류:', error);
+      // 연결 실패해도 업로드는 시도할 수 있도록 경고만 표시
+      const proceed = confirm('⚠️ 원격 서버 연결 테스트 실패했습니다.\n그래도 업로드를 활성화하시겠습니까?');
+      if (proceed) {
+        setRemoteServerConfig({ ...remoteServerConfig, enabled: true });
+      }
+    } finally {
+      setRemoteServerTesting(false);
+    }
+  };
+
+  // 원격 서버에 파일 업로드
+  const uploadToRemoteServer = async (file, originalName) => {
+    if (!remoteServerConfig.enabled || !remoteServerConfig.url) {
+      return null;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file, originalName);
+
+      const headers = {};
+      if (remoteServerConfig.apiKey) {
+        headers['Authorization'] = `Bearer ${remoteServerConfig.apiKey}`;
+      }
+
+      const uploadUrl = `${remoteServerConfig.url}/api/upload`;
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: headers,
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('원격 서버 업로드 성공:', data);
+        return data;
+      } else {
+        const errorData = await response.json().catch(() => ({ error: '업로드 실패' }));
+        console.error('원격 서버 업로드 실패:', errorData);
+        return null;
+      }
+    } catch (error) {
+      console.error('원격 서버 업로드 오류:', error);
+      return null;
+    }
+  };
+
   const handleExport = async () => {
     if (clips.length === 0) {
       alert('⚠️ 타임라인에 클립이 없습니다.');
@@ -644,42 +796,66 @@ const CutFlowApp = () => {
     setExportProgress(0);
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/export`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          clips: clips.map(clip => ({
-            ...clip,
-            path: clip.path || `/uploads/${clip.name}`
-          })),
-          texts,
-          duration
-        })
+      // FFmpeg 초기화
+      await initFFmpeg((progress) => {
+        setExportProgress(progress);
       });
 
-      if (!response.ok) {
-        throw new Error('내보내기 실패');
+      // 클립에서 파일 가져오기 (IndexedDB에서)
+      const clipsWithFiles = await Promise.all(
+        clips.map(async (clip) => {
+          if (clip.fileId) {
+            const fileData = await getFileFromDB(clip.fileId);
+            if (fileData && fileData.file) {
+              return {
+                ...clip,
+                file: fileData.file
+              };
+            }
+          }
+          // fileId가 없거나 파일을 찾을 수 없는 경우
+          return clip;
+        })
+      );
+
+      // 파일이 있는 클립만 필터링
+      const validClips = clipsWithFiles.filter(clip => clip.file);
+      
+      if (validClips.length === 0) {
+        throw new Error('내보낼 수 있는 파일이 없습니다. 파일을 다시 업로드해주세요.');
       }
 
-      const data = await response.json();
-      
-      // 진행률 시뮬레이션 (실제로는 WebSocket이나 SSE 사용)
-      let progress = 0;
-    const interval = setInterval(() => {
-        progress += 5;
+      // 내보내기 실행
+      const blob = await exportVideo({
+        clips: validClips,
+        texts,
+        effects,
+        duration
+      }, (progress) => {
         setExportProgress(progress);
-        if (progress >= 100) {
-          clearInterval(interval);
-          setIsExporting(false);
-          alert(`✅ 비디오 내보내기 완료!\n파일: ${data.filename}\n크기: ${(data.size / 1024 / 1024).toFixed(2)}MB\n\n다운로드: ${API_BASE_URL}${data.path}`);
-        }
-      }, 200);
+      });
+
+      // 다운로드
+      const filename = `output-${Date.now()}.mp4`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      setIsExporting(false);
+      setExportProgress(100);
+      
+      const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+      alert(`✅ 비디오 내보내기 완료!\n파일: ${filename}\n크기: ${sizeMB}MB`);
     } catch (error) {
       console.error('내보내기 오류:', error);
       setIsExporting(false);
-      alert('❌ 비디오 내보내기 중 오류가 발생했습니다.');
+      setExportProgress(0);
+      alert(`❌ 비디오 내보내기 중 오류가 발생했습니다.\n\n${error.message}\n\n브라우저 개발자 도구(F12) > Console 탭에서 상세 오류를 확인할 수 있습니다.`);
     }
   };
 
@@ -706,54 +882,108 @@ const CutFlowApp = () => {
   const deleteClip = (clipId) => {
     const clip = clips.find(c => c.id === clipId);
     // 그래픽 효과 클립이면 관련 효과도 삭제
-    if (clip && clip.type === 'graphics' && clip.effectType) {
-      // 같은 effectType과 시간 범위를 가진 효과 찾아서 삭제
-      setEffects(effects.filter(e => {
-        // 효과와 클립의 시간 범위가 겹치지 않거나 effectType이 다르면 유지
-        return !(e.type === clip.effectType && 
-                 e.startTime === clip.startTime && 
-                 e.endTime === clip.endTime);
-      }));
+    if (clip && clip.type === 'graphics' && clip.effectId) {
+      // effectId로 정확히 매칭하여 삭제
+      setEffects(prev => prev.filter(e => e.id !== clip.effectId));
+      if (selectedEffect === clip.effectId) setSelectedEffect(null);
     }
-    setClips(clips.filter(c => c.id !== clipId));
+    setClips(prev => prev.filter(c => c.id !== clipId));
     if (selectedClip === clipId) setSelectedClip(null);
   };
 
   const updateClip = (clipId, updates) => {
-    setClips(clips.map(c => c.id === clipId ? { ...c, ...updates } : c));
+    setClips(prevClips => prevClips.map(c => c.id === clipId ? { ...c, ...updates } : c));
   };
 
   const handleClipDrag = (clipId, newStartTime) => {
-    const clip = clips.find(c => c.id === clipId);
-    if (!clip) return;
-    const clipDuration = clip.endTime - clip.startTime;
-    
-    // 스냅 가이드 찾기
-    const snapTime = findSnapGuide(newStartTime, 1.0, clipId);
-    const finalStartTime = snapTime !== null ? snapTime : newStartTime;
-    
-    const clampedStart = Math.max(0, Math.min(finalStartTime, duration - clipDuration));
-    updateClip(clipId, { 
-      startTime: clampedStart, 
-      endTime: clampedStart + clipDuration 
+    setClips(prevClips => {
+      const clip = prevClips.find(c => c.id === clipId);
+      if (!clip) return prevClips;
+      
+      const clipDuration = clip.endTime - clip.startTime;
+      
+      // 스냅 가이드 찾기
+      const snapTime = findSnapGuide(newStartTime, 1.0, clipId);
+      const finalStartTime = snapTime !== null ? snapTime : newStartTime;
+      
+      const clampedStart = Math.max(0, Math.min(finalStartTime, duration - clipDuration));
+      
+      const updatedClips = prevClips.map(c => 
+        c.id === clipId 
+          ? { ...c, startTime: clampedStart, endTime: clampedStart + clipDuration }
+          : c
+      );
+      
+      // 그래픽 효과 클립인 경우 effects 배열도 업데이트
+      if (clip.type === 'graphics' && clip.effectId) {
+        setEffects(prevEffects => prevEffects.map(e => {
+          // effectId로 정확히 매칭
+          if (e.id === clip.effectId) {
+            return {
+              ...e,
+              startTime: clampedStart,
+              endTime: clampedStart + clipDuration
+            };
+          }
+          return e;
+        }));
+      }
+      
+      return updatedClips;
     });
   };
 
   const handleClipResize = (clipId, side, newTime) => {
-    const clip = clips.find(c => c.id === clipId);
-    if (!clip) return;
-    
-    // 스냅 가이드 찾기
-    const snapTime = findSnapGuide(newTime, 1.0, clipId);
-    const finalTime = snapTime !== null ? snapTime : newTime;
-    
-    if (side === 'left') {
-      const clampedStart = Math.max(0, Math.min(finalTime, clip.endTime - 1));
-      updateClip(clipId, { startTime: clampedStart });
-    } else {
-      const clampedEnd = Math.max(clip.startTime + 1, Math.min(finalTime, duration));
-      updateClip(clipId, { endTime: clampedEnd });
-    }
+    setClips(prevClips => {
+      const clip = prevClips.find(c => c.id === clipId);
+      if (!clip) return prevClips;
+      
+      // 최소 길이 제한 (0.5초)
+      const minDuration = 0.5;
+      
+      // 스냅 가이드 찾기
+      const snapTime = findSnapGuide(newTime, 1.0, clipId);
+      let finalTime = snapTime !== null ? snapTime : newTime;
+      
+      let updatedClips;
+      let newStartTime = clip.startTime;
+      let newEndTime = clip.endTime;
+      
+      if (side === 'left') {
+        // 왼쪽 리사이즈: startTime 변경, endTime은 유지
+        const maxStart = clip.endTime - minDuration;
+        const clampedStart = Math.max(0, Math.min(finalTime, maxStart));
+        newStartTime = clampedStart;
+        updatedClips = prevClips.map(c => 
+          c.id === clipId ? { ...c, startTime: clampedStart } : c
+        );
+      } else {
+        // 오른쪽 리사이즈: endTime 변경, startTime은 유지
+        const minEnd = clip.startTime + minDuration;
+        const clampedEnd = Math.max(minEnd, Math.min(finalTime, duration));
+        newEndTime = clampedEnd;
+        updatedClips = prevClips.map(c => 
+          c.id === clipId ? { ...c, endTime: clampedEnd } : c
+        );
+      }
+      
+      // 그래픽 효과 클립인 경우 effects 배열도 업데이트
+      if (clip.type === 'graphics' && clip.effectId) {
+        setEffects(prevEffects => prevEffects.map(e => {
+          // effectId로 정확히 매칭
+          if (e.id === clip.effectId) {
+            return {
+              ...e,
+              startTime: newStartTime,
+              endTime: newEndTime
+            };
+          }
+          return e;
+        }));
+      }
+      
+      return updatedClips;
+    });
   };
 
   const getClipsForTrack = (trackId) => {
@@ -761,7 +991,14 @@ const CutFlowApp = () => {
   };
 
   const pixelsPerSecond = 20 * timelineZoom;
-  const timelineWidth = duration * pixelsPerSecond;
+  
+  // 타임라인 눈금 고정 간격 (초 단위) - duration과 무관하게 고정
+  const TIMELINE_GRID_INTERVAL = 5; // 5초 간격으로 고정
+  const TIMELINE_MAX_DISPLAY = 300; // 최대 300초(5분)까지 표시
+  
+  // 타임라인 너비는 고정 (duration과 무관하게 최소 300초 기준)
+  // duration이 더 길면 duration 기준으로, 짧으면 최소 300초 기준
+  const timelineWidth = Math.max(duration, TIMELINE_MAX_DISPLAY) * pixelsPerSecond;
 
   const handleTimelineClick = (e) => {
     if (isDraggingPlayhead) return;
@@ -848,16 +1085,18 @@ const CutFlowApp = () => {
     }
     
     const maxEndTime = Math.max(...clips.map(clip => clip.endTime));
-    const newDuration = Math.ceil(maxEndTime / 5) * 5; // 5초 단위로 올림
-    if (newDuration > duration) {
-      setDuration(newDuration);
-    }
+    // 최소 5초, 클립 길이에 정확히 맞춤 (올림 제거, 정확한 값 사용)
+    // 0.1초 단위로 반올림하여 정확한 길이 표시
+    const newDuration = Math.max(5, Math.round(maxEndTime * 10) / 10);
+    // duration을 항상 업데이트 (클립이 짧아져도 반영)
+    setDuration(newDuration);
   }, [clips]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 효과 추가 함수
   const addEffect = (effectType) => {
+    const effectId = Date.now();
     const newEffect = {
-      id: Date.now(),
+      id: effectId,
       type: effectType,
       startTime: currentTime,
       endTime: Math.min(currentTime + 5, duration),
@@ -865,39 +1104,35 @@ const CutFlowApp = () => {
       intensity: 50,
       color: '#ffffff'
     };
-    setEffects([...effects, newEffect]);
+    setEffects(prev => [...prev, newEffect]);
     
-    // 타임라인에도 클립 추가
+    // 타임라인에도 클립 추가 (각 효과마다 독립적인 클립 생성)
     const graphicsTrack = tracks.find(t => t.id === 'graphics');
     if (graphicsTrack) {
-      addClip(graphicsTrack.id, 'graphics');
       const newClip = {
-        id: Date.now() + 1,
+        id: effectId + 1, // 효과 ID와 다른 고유 ID 사용
         trackId: graphicsTrack.id,
         startTime: currentTime,
         endTime: Math.min(currentTime + 5, duration),
-        name: newEffect.name,
+        name: `${newEffect.name} (${effects.filter(e => e.type === effectType).length + 1})`,
         type: 'graphics',
-        effectType: effectType
+        effectType: effectType,
+        effectId: effectId // 효과 ID를 클립에 저장하여 정확히 매칭
       };
-      setClips([...clips, newClip]);
+      setClips(prev => [...prev, newClip]);
+      setSelectedClip(newClip.id);
+      setSelectedEffect(effectId);
     }
   };
 
   const deleteEffect = (effectId) => {
-    const effect = effects.find(e => e.id === effectId);
-    // 관련된 타임라인 클립도 삭제
-    if (effect) {
-      setClips(clips.filter(c => {
-        // 같은 effectType과 시간 범위를 가진 그래픽 클립 삭제
-        return !(c.type === 'graphics' && 
-                 c.effectType === effect.type &&
-                 c.startTime === effect.startTime && 
-                 c.endTime === effect.endTime);
-      }));
-    }
-    setEffects(effects.filter(e => e.id !== effectId));
+    // effectId로 정확히 매칭하여 관련 타임라인 클립도 삭제
+    setClips(prev => prev.filter(c => !(c.type === 'graphics' && c.effectId === effectId)));
+    setEffects(prev => prev.filter(e => e.id !== effectId));
     if (selectedEffect === effectId) setSelectedEffect(null);
+    if (selectedClip && clips.find(c => c.id === selectedClip && c.effectId === effectId)) {
+      setSelectedClip(null);
+    }
   };
 
   const updateEffect = (effectId, updates) => {
@@ -960,6 +1195,7 @@ const CutFlowApp = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">이메일</label>
                 <input
                   type="email"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
@@ -971,6 +1207,7 @@ const CutFlowApp = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">비밀번호</label>
                 <input
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
@@ -1138,8 +1375,8 @@ const CutFlowApp = () => {
         style={{ minHeight: 'calc(100vh - 64px)' }}
       />
 
-      <div className="flex-1 flex flex-col bg-gray-950 mt-16" style={{ minWidth: 0 }}>
-        <div className="flex-1 flex items-center justify-center bg-black relative overflow-hidden p-6">
+      <div className="flex-1 flex flex-col bg-gray-950 mt-16 overflow-hidden" style={{ minWidth: 0 }}>
+        <div className="flex-1 flex items-center justify-center bg-black relative overflow-hidden p-6" style={{ minHeight: 0 }}>
           <div className="relative w-full h-full flex items-center justify-center">
             <div className="relative bg-gradient-to-br from-blue-900 via-purple-900 to-blue-800 rounded-lg overflow-hidden flex items-center justify-center shadow-2xl border-4 border-gray-700" 
                  style={{ 
@@ -1165,42 +1402,62 @@ const CutFlowApp = () => {
               {/* 실제 비디오 재생 */}
               {currentVideoFile && currentVideoFile.type === 'video' && (() => {
                 // 현재 활성화된 효과에 따른 비디오 스타일 계산
-                const zoomEffect = currentEffects.find(e => e.type === 'zoom');
-                const fadeEffect = currentEffects.find(e => e.type === 'fade');
-                const blurEffect = currentEffects.find(e => e.type === 'blur');
+                const zoomEffect = currentEffects.find(e => e.type === 'zoom' && currentTime >= e.startTime && currentTime < e.endTime);
+                const fadeEffect = currentEffects.find(e => e.type === 'fade' && currentTime >= e.startTime && currentTime < e.endTime);
+                const blurEffect = currentEffects.find(e => e.type === 'blur' && currentTime >= e.startTime && currentTime < e.endTime);
                 
                 let videoStyle = {
                   transform: '',
                   opacity: 1,
-                  filter: ''
+                  filter: '',
+                  transformOrigin: 'center center'
                 };
                 
                 if (zoomEffect) {
-                  const effectProgress = Math.max(0, Math.min(1, (currentTime - zoomEffect.startTime) / (zoomEffect.endTime - zoomEffect.startTime)));
-                  const intensity = zoomEffect.intensity / 100;
+                  const effectDuration = zoomEffect.endTime - zoomEffect.startTime;
+                  const effectProgress = effectDuration > 0 
+                    ? Math.max(0, Math.min(1, (currentTime - zoomEffect.startTime) / effectDuration))
+                    : 0;
+                  const intensity = (zoomEffect.intensity || 50) / 100;
+                  // 줌 효과: 시작 시 1.0에서 끝날 때 (1.0 + intensity * 0.5)까지 확대
                   const scale = 1.0 + (intensity * 0.5 * effectProgress);
                   videoStyle.transform = `scale(${scale})`;
-                  videoStyle.transformOrigin = 'center center';
                 }
                 
                 if (fadeEffect) {
-                  const effectProgress = Math.max(0, Math.min(1, (currentTime - fadeEffect.startTime) / (fadeEffect.endTime - fadeEffect.startTime)));
-                  const intensity = fadeEffect.intensity / 100;
-                  const opacity = 1.0 - (intensity * 0.5 * (1 - effectProgress));
-                  videoStyle.opacity = Math.max(0, Math.min(1, opacity));
+                  const effectDuration = fadeEffect.endTime - fadeEffect.startTime;
+                  const effectProgress = effectDuration > 0
+                    ? Math.max(0, Math.min(1, (currentTime - fadeEffect.startTime) / effectDuration))
+                    : 0;
+                  const intensity = (fadeEffect.intensity || 50) / 100;
+                  // 페이드 효과: 페이드 인/아웃 (시작과 끝에서 투명, 중간에서 불투명)
+                  // 효과의 처음 30%와 마지막 30%에서 페이드 처리
+                  let opacity = 1.0;
+                  if (effectProgress < 0.3) {
+                    // 페이드 인: 0 → 1 (처음 30%)
+                    opacity = effectProgress / 0.3;
+                  } else if (effectProgress > 0.7) {
+                    // 페이드 아웃: 1 → 0 (마지막 30%)
+                    opacity = (1 - effectProgress) / 0.3;
+                  }
+                  // intensity에 따라 최소 opacity 조정 (0.1 ~ 1.0)
+                  const minOpacity = 0.1 + (intensity * 0.9);
+                  opacity = Math.max(minOpacity * opacity, 0.1);
+                  videoStyle.opacity = Math.max(0.1, Math.min(1, opacity));
                 }
                 
                 if (blurEffect) {
-                  const intensity = blurEffect.intensity / 100;
+                  const intensity = (blurEffect.intensity || 50) / 100;
+                  // 블러 효과: intensity에 따라 0~10px 블러
                   const blur = intensity * 10;
                   videoStyle.filter = `blur(${blur}px)`;
                 }
                 
                 return (
                   <video
-                    key={currentVideoFile.path}
+                    key={currentVideoFile.id || currentVideoFile.path}
                     ref={videoRef}
-                    src={`${API_BASE_URL}${currentVideoFile.path}`}
+                    src={currentVideoFile.url || currentVideoFile.path}
                     className="absolute inset-0 w-full h-full object-contain"
                     style={{
                       ...videoStyle,
@@ -1257,9 +1514,9 @@ const CutFlowApp = () => {
               {/* 오디오 재생 (숨김) */}
               {currentAudioFile && currentAudioFile.type === 'audio' && (
                 <audio
-                  key={currentAudioFile.path}
+                  key={currentAudioFile.id || currentAudioFile.path}
                   ref={audioRef}
-                  src={`${API_BASE_URL}${currentAudioFile.path}`}
+                  src={currentAudioFile.url || currentAudioFile.path}
                   onLoadedMetadata={(e) => {
                     if (currentAudioClip) {
                       const clipStart = currentAudioClip.startTime;
@@ -1303,8 +1560,8 @@ const CutFlowApp = () => {
               {/* 이미지 표시 - 비디오 뒤에 배경으로 표시 */}
               {currentImageFile && currentImageFile.type === 'image' && (
                 <img
-                  key={currentImageFile.path}
-                  src={`${API_BASE_URL}${currentImageFile.path}`}
+                  key={currentImageFile.id || currentImageFile.path}
+                  src={currentImageFile.url || currentImageFile.path}
                   alt={currentImageFile.originalName}
                   className="absolute inset-0 w-full h-full object-contain z-0"
                   style={{ zIndex: 1 }}
@@ -1333,19 +1590,27 @@ const CutFlowApp = () => {
                     className="absolute inset-0 pointer-events-none"
                     style={{ zIndex: 16 }}
                   >
-                    {particles.map(particle => (
-                      <div
-                        key={`${effect.id}-${particle.id}`}
-                        className="absolute w-2 h-2 bg-white rounded-full animate-ping"
-                        style={{
-                          left: `${particle.left}%`,
-                          top: `${particle.top}%`,
-                          animationDelay: `${particle.delay}s`,
-                          animationDuration: `${particle.duration}s`,
-                          opacity: particle.opacity
-                        }}
-                      />
-                    ))}
+                    {particles.map(particle => {
+                      const intensity = (effect.intensity || 50) / 100;
+                      // 강도에 따라 파티클 크기와 밝기 조정
+                      const size = 2 + (intensity * 3); // 2px ~ 5px
+                      const brightness = 0.5 + (intensity * 0.5); // 0.5 ~ 1.0
+                      return (
+                        <div
+                          key={`${effect.id}-${particle.id}`}
+                          className="absolute bg-white rounded-full"
+                          style={{
+                            left: `${particle.left}%`,
+                            top: `${particle.top}%`,
+                            width: `${size}px`,
+                            height: `${size}px`,
+                            opacity: particle.opacity * brightness,
+                            boxShadow: `0 0 ${size * 2}px rgba(255, 255, 255, ${brightness})`,
+                            animation: `sparklePulse ${particle.duration}s ease-in-out ${particle.delay}s infinite`
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -1474,9 +1739,9 @@ const CutFlowApp = () => {
           </div>
         </div>
 
-        <div className="bg-gray-800 border-t border-gray-700 shadow-lg flex flex-col">
+        <div className="bg-gray-800 border-t border-gray-700 shadow-lg flex flex-col flex-shrink-0" style={{ maxHeight: '40vh', minHeight: '200px' }}>
           {/* 타임라인 UI */}
-          <div className="border-b border-gray-700 bg-gray-900">
+          <div className="border-b border-gray-700 bg-gray-900 flex-shrink-0">
             <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-gray-300">타임라인</h3>
@@ -1504,15 +1769,8 @@ const CutFlowApp = () => {
           </div>
 
             <div 
-              className={`${(() => {
-                // 실제 클립이 있는지 확인하고, 가장 오른쪽 클립의 endTime을 기준으로 스크롤 필요 여부 판단
-                if (clips.length === 0) return '';
-                const maxEndTime = Math.max(...clips.map(clip => clip.endTime));
-                const actualTimelineWidth = maxEndTime * pixelsPerSecond;
-                const availableWidth = (window.innerWidth || 1920) - leftPanelWidth - rightPanelWidth;
-                return actualTimelineWidth + 128 > availableWidth ? 'overflow-x-auto' : '';
-              })()} ${tracks.length * 48 > 300 ? 'overflow-y-auto' : ''}`}
-              style={{ maxHeight: '300px' }}
+              className={`flex-1 overflow-x-auto ${tracks.length * 48 > 300 ? 'overflow-y-auto' : ''}`}
+              style={{ minHeight: 0 }}
             >
               <div className="flex" style={{ minWidth: `${timelineWidth + 128}px` }}>
                 {/* 시간 스케일 */}
@@ -1522,19 +1780,32 @@ const CutFlowApp = () => {
                 <div className="relative" style={{ width: `${timelineWidth}px` }}>
                   {/* 시간 마커 */}
                   <div className="absolute top-0 left-0 right-0 h-8 bg-gray-800 border-b border-gray-700 z-10">
-                    {/* 1초 단위 마커 (얇은 선) */}
-                    {Array.from({ length: Math.ceil(duration) + 1 }, (_, i) => i).map(sec => {
-                      const isFiveSecond = sec % 5 === 0;
+                    {/* 고정 간격 눈금 (5초 단위) - 타임라인 전체에 고정 표시 */}
+                    {Array.from({ length: Math.ceil(TIMELINE_MAX_DISPLAY / TIMELINE_GRID_INTERVAL) + 1 }, (_, i) => {
+                      const sec = i * TIMELINE_GRID_INTERVAL;
+                      
                       return (
                         <div
                           key={sec}
-                          className={`absolute ${isFiveSecond ? 'border-l-2 border-gray-500' : 'border-l border-gray-700'}`}
+                          className="absolute border-l-2 border-gray-500"
                           style={{ left: `${sec * pixelsPerSecond}px`, height: '100%' }}
                         >
-                          {isFiveSecond && (
-                            <span className="absolute top-1 left-1 text-xs text-gray-400">{formatTime(sec)}</span>
-                          )}
+                          <span className="absolute top-1 left-1 text-xs text-gray-400">{formatTime(sec)}</span>
                         </div>
+                      );
+                    })}
+                    
+                    {/* 1초 단위 얇은 선 (타임라인 전체에 표시) */}
+                    {Array.from({ length: Math.ceil(TIMELINE_MAX_DISPLAY) + 1 }, (_, i) => i).map(sec => {
+                      // 5초 간격은 이미 표시했으므로 제외
+                      if (sec % TIMELINE_GRID_INTERVAL === 0) return null;
+                      
+                      return (
+                        <div
+                          key={`thin-${sec}`}
+                          className="absolute border-l border-gray-700 opacity-50"
+                          style={{ left: `${sec * pixelsPerSecond}px`, height: '100%' }}
+                        />
                       );
                     })}
                     
@@ -1591,8 +1862,18 @@ const CutFlowApp = () => {
                       document.body.style.cursor = 'ew-resize';
                     }}
                   >
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-yellow-400"></div>
-                    <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-yellow-400"></div>
+                    <div className="absolute top-0 bottom-0 w-1.5 bg-yellow-400"></div>
+                    <div 
+                      className="absolute left-1/2 transform -translate-x-1/2"
+                      style={{
+                        top: '-8px',
+                        width: 0,
+                        height: 0,
+                        borderLeft: '6px solid transparent',
+                        borderRight: '6px solid transparent',
+                        borderBottom: '6px solid rgb(250 204 21)'
+                      }}
+                    ></div>
                   </div>
                   
                   {/* 스냅 가이드 라인 */}
@@ -1757,11 +2038,6 @@ const CutFlowApp = () => {
                           return (
                             <div
                               key={clip.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedClip(clip.id);
-                                setCurrentTime(clip.startTime);
-                              }}
                               className={`absolute top-1 bottom-1 rounded cursor-move transition-all ${
                                 isSelected 
                                   ? `${track.color} ring-2 ring-yellow-400 shadow-lg` 
@@ -1770,48 +2046,173 @@ const CutFlowApp = () => {
                               style={{
                                 left: `${clipLeft}px`,
                                 width: `${clipWidth}px`,
-                                minWidth: '40px'
+                                minWidth: '40px',
+                                pointerEvents: 'auto'
                               }}
                               onMouseDown={(e) => {
                                 // 리사이즈 핸들이 아닐 때만 드래그 시작
-                                if (e.target.closest('.cursor-ew-resize')) return;
+                                const target = e.target;
+                                const isResizeHandle = target.closest('.resize-handle') || 
+                                                      target.classList.contains('resize-handle') ||
+                                                      target.closest('.cursor-ew-resize') ||
+                                                      target.classList.contains('cursor-ew-resize');
+                                
+                                // 삭제 버튼 클릭은 무시
+                                if (target.closest('button') || target.tagName === 'BUTTON') {
+                                  return;
+                                }
+                                
+                                if (isResizeHandle) {
+                                  // 리사이즈 핸들 클릭은 클립 드래그를 방지
+                                  return;
+                                }
                                 
                                 e.stopPropagation();
-                                setSelectedClip(clip.id);
+                                e.preventDefault();
                                 
+                                const clipId = clip.id;
                                 const startX = e.clientX;
-                                const startTime = clip.startTime;
-                                const clipDuration = clip.endTime - clip.startTime;
+                                const initialStartTime = clip.startTime;
+                                const initialEndTime = clip.endTime;
+                                const initialDuration = initialEndTime - initialStartTime;
+                                
+                                setSelectedClip(clipId);
+                                setCurrentTime(initialStartTime);
+                                
+                                let rafId3 = null;
+                                let lastUpdateTime = initialStartTime;
+                                let lastSnapTime = null;
                                 
                                 const handleMouseMove = (e2) => {
-                                  const deltaTime = (e2.clientX - startX) / pixelsPerSecond;
-                                  let newStartTime = Math.max(0, Math.min(startTime + deltaTime, duration - clipDuration));
+                                  e2.preventDefault();
                                   
-                                  // 스냅 가이드 찾기 (더 강력한 스냅)
-                                  const snapTime = findSnapGuide(newStartTime, 1.0, clip.id);
-                                  if (snapTime !== null) {
-                                    newStartTime = snapTime;
-                                    setSnapGuideTime(snapTime);
-                                  } else {
-                                    setSnapGuideTime(null);
+                                  if (rafId3 !== null) return;
+                                  
+                                  rafId3 = requestAnimationFrame(() => {
+                                    // 최신 클립 상태 가져오기
+                                    setClips(prevClips => {
+                                      const currentClip = prevClips.find(c => c.id === clipId);
+                                      if (!currentClip) {
+                                        rafId3 = null;
+                                        return prevClips;
+                                      }
+                                      
+                                      const currentClipDuration = currentClip.endTime - currentClip.startTime;
+                                      const deltaTime = (e2.clientX - startX) / pixelsPerSecond;
+                                      let newStartTime = Math.max(0, Math.min(initialStartTime + deltaTime, duration - currentClipDuration));
+                                      
+                                      // 최소 0.05초 이상 변경되었을 때만 상태 업데이트
+                                      if (Math.abs(newStartTime - lastUpdateTime) < 0.05) {
+                                        rafId3 = null;
+                                        return prevClips;
+                                      }
+                                      
+                                      // 스냅 가이드 찾기
+                                      const snapTime = findSnapGuide(newStartTime, 1.0, clipId);
+                                      if (snapTime !== null) {
+                                        newStartTime = snapTime;
+                                        if (snapTime !== lastSnapTime) {
+                                          // 상태 업데이트는 setClips 외부에서
+                                          setTimeout(() => {
+                                            setSnapGuideTime(snapTime);
+                                          }, 0);
+                                          lastSnapTime = snapTime;
+                                        }
+                                      } else {
+                                        if (lastSnapTime !== null) {
+                                          setTimeout(() => {
+                                            setSnapGuideTime(null);
+                                          }, 0);
+                                          lastSnapTime = null;
+                                        }
+                                      }
+                                      
+                                      // 드래그 중인 클립의 시간 표시 (시각적 업데이트만)
+                                      setTimeout(() => {
+                                        setDraggingClipTime(newStartTime);
+                                      }, 0);
+                                      
+                                      // 실제 클립 위치 업데이트
+                                      const clampedStart = Math.max(0, Math.min(newStartTime, duration - currentClipDuration));
+                                      
+                                      lastUpdateTime = newStartTime;
+                                      rafId3 = null;
+                                      
+                                      const updatedClips = prevClips.map(c => 
+                                        c.id === clipId 
+                                          ? { ...c, startTime: clampedStart, endTime: clampedStart + currentClipDuration }
+                                          : c
+                                      );
+                                      
+                                      // 그래픽 효과 클립인 경우 effects 배열도 업데이트
+                                      if (currentClip.type === 'graphics' && currentClip.effectId) {
+                                        setEffects(prevEffects => prevEffects.map(e => {
+                                          // effectId로 정확히 매칭
+                                          if (e.id === currentClip.effectId) {
+                                            return {
+                                              ...e,
+                                              startTime: clampedStart,
+                                              endTime: clampedStart + currentClipDuration
+                                            };
+                                          }
+                                          return e;
+                                        }));
+                                      }
+                                      
+                                      return updatedClips;
+                                    });
+                                  });
+                                };
+                                
+                                const handleMouseUp = (e) => {
+                                  // 마지막 위치 확정
+                                  if (rafId3 !== null) {
+                                    cancelAnimationFrame(rafId3);
+                                    rafId3 = null;
                                   }
                                   
-                                  // 드래그 중인 클립의 시간 표시
-                                  setDraggingClipTime(newStartTime);
-                                  
-                                  handleClipDrag(clip.id, newStartTime);
-                                };
-                                
-                                const handleMouseUp = () => {
-                                  setSnapGuideTime(null);
-                                  setDraggingClipTime(null);
+                                  // 이벤트 리스너 제거 (먼저 처리)
                                   document.removeEventListener('mousemove', handleMouseMove);
                                   document.removeEventListener('mouseup', handleMouseUp);
-                                  document.body.style.cursor = '';
-                                  document.body.style.userSelect = '';
+                                  
+                                  // 마지막 업데이트는 requestAnimationFrame으로 지연 처리
+                                  requestAnimationFrame(() => {
+                                    const finalX = e ? e.clientX : startX;
+                                    const deltaTime = (finalX - startX) / pixelsPerSecond;
+                                    
+                                    setClips(prevClips => {
+                                      const currentClip = prevClips.find(c => c.id === clipId);
+                                      if (!currentClip) return prevClips;
+                                      
+                                      const currentClipDuration = currentClip.endTime - currentClip.startTime;
+                                      let finalStartTime = Math.max(0, Math.min(initialStartTime + deltaTime, duration - currentClipDuration));
+                                      
+                                      const snapTime = findSnapGuide(finalStartTime, 1.0, clipId);
+                                      if (snapTime !== null) {
+                                        finalStartTime = snapTime;
+                                      }
+                                      
+                                      const clampedStart = Math.max(0, Math.min(finalStartTime, duration - currentClipDuration));
+                                      
+                                      // 상태 업데이트는 외부에서 처리
+                                      setTimeout(() => {
+                                        setSnapGuideTime(null);
+                                        setDraggingClipTime(null);
+                                      }, 0);
+                                      
+                                      return prevClips.map(c => 
+                                        c.id === clipId 
+                                          ? { ...c, startTime: clampedStart, endTime: clampedStart + currentClipDuration }
+                                          : c
+                                      );
+                                    });
+                                    
+                                    document.body.style.cursor = '';
+                                    document.body.style.userSelect = '';
+                                  });
                                 };
                                 
-                                document.addEventListener('mousemove', handleMouseMove);
+                                document.addEventListener('mousemove', handleMouseMove, { passive: false });
                                 document.addEventListener('mouseup', handleMouseUp);
                                 document.body.style.cursor = 'grabbing';
                                 document.body.style.userSelect = 'none';
@@ -1859,39 +2260,108 @@ const CutFlowApp = () => {
                               {isSelected && (
                                 <>
                                   <div
-                                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-50"
+                                    className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-70 z-[100] resize-handle"
+                                    style={{ 
+                                      pointerEvents: 'auto',
+                                      zIndex: 100
+                                    }}
                                     onMouseDown={(e) => {
                                       e.stopPropagation();
-                                      const startX = e.clientX;
-                                      const startTime = clip.startTime;
+                                      e.preventDefault();
                                       
-                                      // 리사이즈 시작 시점에 즉시 표시
-                                      setResizingClipId(clip.id);
-                                      setResizingClipTime(startTime);
+                                      const clipId = clip.id;
+                                      const startX = e.clientX;
+                                      const initialStartTime = clip.startTime;
+                                      const initialEndTime = clip.endTime;
+                                      
+                                      setResizingClipId(clipId);
+                                      setResizingClipTime(initialStartTime);
                                       setResizingSide('left');
                                       
+                                      let rafId = null;
+                                      let lastUpdateTime = initialStartTime;
+                                      
                                       const handleMouseMove = (e2) => {
-                                        const deltaX = (e2.clientX - startX) / pixelsPerSecond;
-                                        let newTime = startTime + deltaX;
+                                        e2.preventDefault();
                                         
-                                        // 스냅 가이드 찾기
-                                        const snapTime = findSnapGuide(newTime, 1.0, clip.id);
-                                        if (snapTime !== null) {
-                                          newTime = snapTime;
-                                          setSnapGuideTime(snapTime);
-                                        } else {
-                                          setSnapGuideTime(null);
-                                        }
+                                        if (rafId !== null) return;
                                         
-                                        // 리사이즈 중인 클립의 시간 표시
-                                        setResizingClipId(clip.id);
-                                        setResizingClipTime(newTime);
-                                        setResizingSide('left');
-                                        
-                                        handleClipResize(clip.id, 'left', newTime);
+                                        rafId = requestAnimationFrame(() => {
+                                          // 최신 클립 상태 가져오기
+                                          setClips(prevClips => {
+                                            const currentClip = prevClips.find(c => c.id === clipId);
+                                            if (!currentClip) {
+                                              rafId = null;
+                                              return prevClips;
+                                            }
+                                            
+                                            const deltaX = (e2.clientX - startX) / pixelsPerSecond;
+                                            let newTime = initialStartTime + deltaX;
+                                            
+                                            const minDuration = 0.5;
+                                            if (newTime >= currentClip.endTime - minDuration) {
+                                              newTime = currentClip.endTime - minDuration;
+                                            }
+                                            
+                                            // 최소 0.05초 이상 변경되었을 때만 상태 업데이트
+                                            if (Math.abs(newTime - lastUpdateTime) < 0.05) {
+                                              rafId = null;
+                                              return prevClips;
+                                            }
+                                            
+                                            const snapTime = findSnapGuide(newTime, 1.0, clipId);
+                                            if (snapTime !== null && snapTime < currentClip.endTime - minDuration) {
+                                              newTime = snapTime;
+                                              setTimeout(() => {
+                                                setSnapGuideTime(snapTime);
+                                              }, 0);
+                                            } else {
+                                              setTimeout(() => {
+                                                setSnapGuideTime(null);
+                                              }, 0);
+                                            }
+                                            
+                                            // 시각적 업데이트는 외부에서 처리
+                                            setTimeout(() => {
+                                              setResizingClipTime(newTime);
+                                            }, 0);
+                                            
+                                            // 실제 클립 크기 업데이트
+                                            const maxStart = currentClip.endTime - minDuration;
+                                            const clampedStart = Math.max(0, Math.min(newTime, maxStart));
+                                            
+                                            lastUpdateTime = newTime;
+                                            rafId = null;
+                                            
+                                            const updatedClips = prevClips.map(c => 
+                                              c.id === clipId ? { ...c, startTime: clampedStart } : c
+                                            );
+                                            
+                                            // 그래픽 효과 클립인 경우 effects 배열도 업데이트
+                                            if (currentClip.type === 'graphics' && currentClip.effectId) {
+                                              setEffects(prevEffects => prevEffects.map(e => {
+                                                // effectId로 정확히 매칭
+                                                if (e.id === currentClip.effectId) {
+                                                  return {
+                                                    ...e,
+                                                    startTime: clampedStart,
+                                                    endTime: currentClip.endTime
+                                                  };
+                                                }
+                                                return e;
+                                              }));
+                                            }
+                                            
+                                            return updatedClips;
+                                          });
+                                        });
                                       };
                                       
                                       const handleMouseUp = () => {
+                                        if (rafId !== null) {
+                                          cancelAnimationFrame(rafId);
+                                          rafId = null;
+                                        }
                                         setSnapGuideTime(null);
                                         setResizingClipTime(null);
                                         setResizingClipId(null);
@@ -1900,44 +2370,114 @@ const CutFlowApp = () => {
                                         document.removeEventListener('mouseup', handleMouseUp);
                                       };
                                       
-                                      document.addEventListener('mousemove', handleMouseMove);
+                                      document.addEventListener('mousemove', handleMouseMove, { passive: false });
                                       document.addEventListener('mouseup', handleMouseUp);
                                     }}
                                   />
                                   <div
-                                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-50"
+                                    className="absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-70 z-[100] resize-handle"
+                                    style={{ 
+                                      pointerEvents: 'auto',
+                                      zIndex: 100
+                                    }}
                                     onMouseDown={(e) => {
                                       e.stopPropagation();
+                                      e.preventDefault();
+                                      
                                       const startX = e.clientX;
                                       const startTime = clip.endTime;
                                       
-                                      // 리사이즈 시작 시점에 즉시 표시
                                       setResizingClipId(clip.id);
                                       setResizingClipTime(startTime);
                                       setResizingSide('right');
                                       
+                                      let rafId = null;
+                                      let lastUpdateTime = startTime;
+                                      
                                       const handleMouseMove = (e2) => {
-                                        const deltaX = (e2.clientX - startX) / pixelsPerSecond;
-                                        let newTime = startTime + deltaX;
+                                        e2.preventDefault();
                                         
-                                        // 스냅 가이드 찾기
-                                        const snapTime = findSnapGuide(newTime, 1.0, clip.id);
-                                        if (snapTime !== null) {
-                                          newTime = snapTime;
-                                          setSnapGuideTime(snapTime);
-                                        } else {
-                                          setSnapGuideTime(null);
-                                        }
+                                        if (rafId !== null) return;
                                         
-                                        // 리사이즈 중인 클립의 시간 표시
-                                        setResizingClipId(clip.id);
-                                        setResizingClipTime(newTime);
-                                        setResizingSide('right');
-                                        
-                                        handleClipResize(clip.id, 'right', newTime);
+                                        rafId = requestAnimationFrame(() => {
+                                          // 최신 클립 상태 가져오기
+                                          setClips(prevClips => {
+                                            const currentClip = prevClips.find(c => c.id === clip.id);
+                                            if (!currentClip) {
+                                              rafId = null;
+                                              return prevClips;
+                                            }
+                                            
+                                            const deltaX = (e2.clientX - startX) / pixelsPerSecond;
+                                            let newTime = startTime + deltaX;
+                                            
+                                            const minDuration = 0.5;
+                                            // 최신 startTime 사용
+                                            if (newTime <= currentClip.startTime + minDuration) {
+                                              newTime = currentClip.startTime + minDuration;
+                                            }
+                                            
+                                            // 최소 0.05초 이상 변경되었을 때만 상태 업데이트
+                                            if (Math.abs(newTime - lastUpdateTime) < 0.05) {
+                                              rafId = null;
+                                              return prevClips;
+                                            }
+                                            
+                                            // 스냅 가이드 찾기 (최신 startTime 사용)
+                                            const snapTime = findSnapGuide(newTime, 1.0, clip.id);
+                                            if (snapTime !== null && snapTime > currentClip.startTime + minDuration) {
+                                              newTime = snapTime;
+                                              setTimeout(() => {
+                                                setSnapGuideTime(snapTime);
+                                              }, 0);
+                                            } else {
+                                              setTimeout(() => {
+                                                setSnapGuideTime(null);
+                                              }, 0);
+                                            }
+                                            
+                                            // 시각적 업데이트는 외부에서 처리
+                                            setTimeout(() => {
+                                              setResizingClipTime(newTime);
+                                            }, 0);
+                                            
+                                            // 실제 클립 크기 업데이트 (최신 startTime 사용)
+                                            const minEnd = currentClip.startTime + minDuration;
+                                            // duration 제한 제거 - 최대한 늘릴 수 있도록
+                                            const clampedEnd = Math.max(minEnd, newTime);
+                                            
+                                            lastUpdateTime = newTime;
+                                            rafId = null;
+                                            
+                                            const updatedClips = prevClips.map(c => 
+                                              c.id === clip.id ? { ...c, endTime: clampedEnd } : c
+                                            );
+                                            
+                                            // 그래픽 효과 클립인 경우 effects 배열도 업데이트
+                                            if (currentClip.type === 'graphics' && currentClip.effectId) {
+                                              setEffects(prevEffects => prevEffects.map(e => {
+                                                // effectId로 정확히 매칭
+                                                if (e.id === currentClip.effectId) {
+                                                  return {
+                                                    ...e,
+                                                    startTime: currentClip.startTime,
+                                                    endTime: clampedEnd
+                                                  };
+                                                }
+                                                return e;
+                                              }));
+                                            }
+                                            
+                                            return updatedClips;
+                                          });
+                                        });
                                       };
                                       
                                       const handleMouseUp = () => {
+                                        if (rafId !== null) {
+                                          cancelAnimationFrame(rafId);
+                                          rafId = null;
+                                        }
                                         setSnapGuideTime(null);
                                         setResizingClipTime(null);
                                         setResizingClipId(null);
@@ -1946,7 +2486,7 @@ const CutFlowApp = () => {
                                         document.removeEventListener('mouseup', handleMouseUp);
                                       };
                                       
-                                      document.addEventListener('mousemove', handleMouseMove);
+                                      document.addEventListener('mousemove', handleMouseMove, { passive: false });
                                       document.addEventListener('mouseup', handleMouseUp);
                                     }}
                                   />
@@ -2004,7 +2544,7 @@ const CutFlowApp = () => {
       {/* 오른쪽 패널 */}
       <div 
         className="bg-gray-800 border-l border-gray-700 overflow-y-auto mt-16 flex flex-col shadow-inner"
-        style={{ width: `${rightPanelWidth}px` }}
+        style={{ width: `${rightPanelWidth}px`, height: 'calc(100vh - 64px)' }}
       >
         <div className="p-4 border-b border-gray-700 flex-shrink-0 bg-gray-900">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">✏️ 텍스트 & 효과</h2>
@@ -2170,6 +2710,103 @@ const CutFlowApp = () => {
           )}
         </div>
       </div>
+
+      {/* 원격 서버 설정 모달 */}
+      {showRemoteServerSettings && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowRemoteServerSettings(false)}
+        >
+          <div 
+            className="bg-gray-800 rounded-lg p-6 w-full max-w-md shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">원격 서버 설정</h2>
+              <button
+                onClick={() => setShowRemoteServerSettings(false)}
+                className="text-gray-400 hover:text-white transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-1">
+                  서버 URL
+                </label>
+                <input
+                  type="text"
+                  value={remoteServerConfig.url}
+                  onChange={(e) => setRemoteServerConfig({ ...remoteServerConfig, url: e.target.value })}
+                  placeholder="https://api.example.com"
+                  className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">예: https://api.example.com 또는 http://192.168.1.100:3001</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-1">
+                  API 키 (선택사항)
+                </label>
+                <input
+                  type="password"
+                  value={remoteServerConfig.apiKey}
+                  onChange={(e) => setRemoteServerConfig({ ...remoteServerConfig, apiKey: e.target.value })}
+                  placeholder="API 키가 필요한 경우 입력"
+                  className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">인증이 필요한 경우에만 입력하세요</p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="remoteServerEnabled"
+                  checked={remoteServerConfig.enabled}
+                  onChange={(e) => setRemoteServerConfig({ ...remoteServerConfig, enabled: e.target.checked })}
+                  className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500"
+                />
+                <label htmlFor="remoteServerEnabled" className="text-sm text-gray-300">
+                  원격 서버 업로드 활성화
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={testRemoteServer}
+                  disabled={remoteServerTesting || !remoteServerConfig.url}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg transition font-semibold"
+                >
+                  {remoteServerTesting ? '테스트 중...' : '연결 테스트'}
+                </button>
+                <button
+                  onClick={() => setShowRemoteServerSettings(false)}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition font-semibold"
+                >
+                  닫기
+                </button>
+              </div>
+
+              {remoteServerConfig.enabled && remoteServerConfig.url && (
+                <div className="mt-2 p-2 bg-green-900 bg-opacity-30 border border-green-700 rounded text-sm text-green-300">
+                  ✓ 원격 서버 업로드가 활성화되었습니다. 파일 업로드 시 자동으로 원격 서버에도 업로드됩니다.
+                </div>
+              )}
+
+              <div className="mt-4 p-3 bg-blue-900 bg-opacity-20 border border-blue-700 rounded text-xs text-blue-300">
+                <p className="font-semibold mb-1">💡 원격 서버 요구사항:</p>
+                <ul className="list-disc list-inside space-y-1 text-blue-200">
+                  <li>POST /api/upload 엔드포인트 필요</li>
+                  <li>multipart/form-data 형식의 파일 업로드 지원</li>
+                  <li>CORS 설정 필요 (필요한 경우)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

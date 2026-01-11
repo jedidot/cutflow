@@ -59,6 +59,9 @@ const CutFlowApp = () => {
   const [email, setEmail] = useState('demo@example.com');
   const [password, setPassword] = useState('demo1234');
   
+  // 토스트 팝업 상태
+  const [toast, setToast] = useState({ show: false, message: '' });
+  
   // 원격 서버 설정 상태 (HTTP 업로드)
   const [showRemoteServerSettings, setShowRemoteServerSettings] = useState(false);
   const [remoteServerConfig, setRemoteServerConfig] = useState({
@@ -1092,8 +1095,23 @@ const CutFlowApp = () => {
     setDuration(newDuration);
   }, [clips]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 토스트 팝업 표시 함수
+  const showToast = (message) => {
+    setToast({ show: true, message });
+    setTimeout(() => {
+      setToast({ show: false, message: '' });
+    }, 3000); // 3초 후 자동으로 사라짐
+  };
+
   // 효과 추가 함수
   const addEffect = (effectType) => {
+    // 줌, 페이드, 블러는 프로토타입에서 구현되지 않음
+    if (effectType === 'zoom' || effectType === 'fade' || effectType === 'blur') {
+      const effectName = effectType === 'zoom' ? '줌' : effectType === 'fade' ? '페이드' : '블러';
+      showToast(`${effectName} 기능은 프로토타입에서는 구현되지 않습니다.`);
+      return;
+    }
+    
     const effectId = Date.now();
     const newEffect = {
       id: effectId,
@@ -2804,6 +2822,28 @@ const CutFlowApp = () => {
                 </ul>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 토스트 팝업 */}
+      {toast.show && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 fade-in">
+          <div className="bg-yellow-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 min-w-[300px] max-w-md">
+            <div className="flex-shrink-0">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <p className="flex-1 text-sm font-medium">{toast.message}</p>
+            <button
+              onClick={() => setToast({ show: false, message: '' })}
+              className="flex-shrink-0 text-white hover:text-gray-200 transition"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}

@@ -21,3 +21,80 @@ body {
     transform: scale(1);
   }
 }
+
+/* 텍스트 애니메이션 효과 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes typewriter {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
+  }
+  50% {
+    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 1s ease-in;
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.8s ease-out;
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+}
+
+.animate-bounce {
+  animation: bounce 1s ease-in-out infinite;
+}
+
+.animate-typewriter {
+  animation: typewriter 2s steps(40);
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 2px solid currentColor;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}

@@ -1269,8 +1269,17 @@ const CutFlowApp = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-8">
-              <div className="inline-block bg-gradient-to-br from-blue-500 to-purple-600 text-white p-4 rounded-lg mb-4">
-                <Play size={32} />
+              <div className="inline-block mb-4">
+                <img 
+                  src="/cutflow-icon.png" 
+                  alt="CutFlow" 
+                  className="w-16 h-16"
+                  style={{ display: 'inline-block' }}
+                  onError={(e) => {
+                    // PNG가 없으면 SVG 사용
+                    e.target.src = '/cutflow-icon.svg';
+                  }}
+                />
               </div>
               <h1 className="text-4xl font-bold text-gray-900"> CutFlow</h1>
               <p className="text-gray-600 mt-2 text-lg">컷플로우 비디오 편집기</p>
@@ -1336,9 +1345,15 @@ const CutFlowApp = () => {
     <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
       <div className="fixed top-0 left-0 right-0 bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between z-50 shadow-lg">
         <div className="flex items-center gap-3">
-          <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
-            <Play size={24} className="fill-white" />
-          </div>
+          <img 
+            src="/cutflow-icon.png" 
+            alt="CutFlow" 
+            className="w-10 h-10"
+            onError={(e) => {
+              // PNG가 없으면 SVG 사용
+              e.target.src = '/cutflow-icon.svg';
+            }}
+          />
           <h1 className="text-2xl font-bold"> CutFlow</h1>
         </div>
         

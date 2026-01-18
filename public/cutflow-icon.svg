@@ -1,28 +1,142 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <!-- 배경 원 -->
-  <circle cx="256" cy="256" r="240" fill="#4F46E5" stroke="#312E81" stroke-width="8"/>
-  
-  <!-- 비디오 필름 스트립 -->
-  <rect x="120" y="140" width="120" height="80" rx="8" fill="#FFFFFF" opacity="0.9"/>
-  <rect x="140" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
-  <rect x="170" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
-  <rect x="200" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
-  
-  <!-- 가위 아이콘 -->
-  <g transform="translate(280, 200)">
-    <!-- 가위 왼쪽 날 -->
-    <path d="M 0 0 L 20 -30 L 30 -20 L 10 10 Z" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
-    <circle cx="5" cy="5" r="8" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+  <defs>
+    <!-- 배경 그라데이션 (deep blue to dark purple) -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a1a;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16213e;stop-opacity:1" />
+    </linearGradient>
     
-    <!-- 가위 오른쪽 날 -->
-    <path d="M 40 0 L 20 -30 L 10 -20 L 30 10 Z" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
-    <circle cx="45" cy="5" r="8" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+    <!-- C 문자 그라데이션 (teal/cyan to pink/magenta) -->
+    <linearGradient id="cGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:1" />
+      <stop offset="25%" style="stop-color:#00a8cc;stop-opacity:1" />
+      <stop offset="60%" style="stop-color:#ff006e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff006e;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- F 문자 색상 (hot pink/magenta) -->
+    <linearGradient id="fGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff006e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff006e;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- 3D 효과를 위한 그림자 -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="4" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.25"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- 배경 -->
+  <rect width="512" height="512" fill="url(#bgGradient)" rx="120"/>
+  
+  <!-- C 문자 (Bold, Rounded, 3D 효과) -->
+  <g transform="translate(180, 256)">
+    <!-- C의 외곽 (두꺼운 둥근 모서리) -->
+    <path 
+      d="M -90 -100 
+         C -130 -100 -160 -70 -160 -30
+         C -160 10 -130 40 -90 40
+         L -40 40
+         C -25 40 -15 30 -15 20
+         C -15 10 -25 0 -40 0
+         L -90 0
+         C -105 0 -115 -10 -115 -20
+         C -115 -30 -105 -40 -90 -40
+         L -40 -40
+         C -25 -40 -15 -50 -15 -60
+         C -15 -70 -25 -80 -40 -80
+         L -90 -80
+         C -105 -80 -115 -90 -115 -100
+         C -115 -110 -105 -120 -90 -120
+         L -40 -120
+         C -25 -120 -15 -110 -15 -100
+         Z
+         M -90 40
+         C -130 40 -160 70 -160 110
+         C -160 150 -130 180 -90 180
+         L -40 180
+         C -25 180 -15 170 -15 160
+         C -15 150 -25 140 -40 140
+         L -90 140
+         C -105 140 -115 130 -115 120
+         C -115 110 -105 100 -90 100
+         L -40 100
+         C -25 100 -15 110 -15 120
+         C -15 130 -25 140 -40 140
+         L -90 140
+         C -105 140 -115 130 -115 120
+         C -115 110 -105 100 -90 100
+         Z"
+      fill="url(#cGradient)"
+      filter="url(#shadow)"
+      stroke="none"
+    />
+    <!-- C의 내부 하이라이트 (3D 효과) -->
+    <ellipse cx="-100" cy="0" rx="60" ry="100" fill="url(#cGradient)" opacity="0.4" transform="rotate(-10 -100 0)"/>
   </g>
   
-  <!-- 플레이 버튼 -->
-  <polygon points="200,320 200,360 240,340" fill="#FFFFFF" opacity="0.9"/>
-  
-  <!-- 타임라인 바 -->
-  <rect x="100" y="400" width="312" height="8" rx="4" fill="#FFFFFF" opacity="0.9"/>
-  <rect x="100" y="400" width="156" height="8" rx="4" fill="#10B981"/>
+  <!-- F 문자 (Script/Calligraphic 스타일, 우아한 곡선) -->
+  <g transform="translate(320, 256)">
+    <!-- F의 메인 수직선 (우아한 곡선) -->
+    <path 
+      d="M 15 -100
+         C 8 -100 2 -94 2 -87
+         C 2 -80 8 -74 15 -74
+         C 22 -74 28 -80 28 -87
+         C 28 -94 22 -100 15 -100
+         Z
+         M 2 -87
+         C 2 -80 8 -74 15 -74
+         L 15 87
+         C 15 94 22 100 28 100
+         C 35 100 41 94 41 87
+         L 41 -87
+         C 41 -94 35 -100 28 -100
+         C 22 -100 15 -94 15 -87
+         Z"
+      fill="url(#fGradient)"
+      stroke="none"
+    />
+    <!-- F의 상단 획 (우아한 곡선과 플로리시) -->
+    <path 
+      d="M 2 -87
+         C 2 -75 12 -65 24 -65
+         C 36 -65 46 -75 46 -87
+         C 46 -99 36 -109 24 -109
+         C 12 -109 2 -99 2 -87
+         Z
+         M 8 -87
+         C 8 -78 15 -71 24 -71
+         C 33 -71 40 -78 40 -87
+         C 40 -96 33 -103 24 -103
+         C 15 -103 8 -96 8 -87
+         Z"
+      fill="url(#fGradient)"
+    />
+    <!-- F의 중간 획 (우아한 곡선) -->
+    <path 
+      d="M 2 -5
+         C 2 7 12 17 24 17
+         C 36 17 46 7 46 -5
+         C 46 -17 36 -27 24 -27
+         C 12 -27 2 -17 2 -5
+         Z
+         M 8 -5
+         C 8 -12 15 -19 24 -19
+         C 33 -19 40 -12 40 -5
+         C 40 2 33 9 24 9
+         C 15 9 8 2 8 -5
+         Z"
+      fill="url(#fGradient)"
+    />
+  </g>
 </svg>

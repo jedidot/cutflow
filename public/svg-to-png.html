@@ -1,0 +1,36 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin: 0; padding: 20px; background: white; }
+    canvas { border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h2>SVG to PNG 변환</h2>
+  <p>아래 이미지를 우클릭하여 "이미지로 저장"을 선택하거나, 브라우저 개발자 도구를 사용하여 PNG로 저장하세요.</p>
+  <img id="svgImage" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+DQogIDwhLS0g67Cw6rK9IOybkCAtLT4NCiAgPGNpcmNsZSBjeD0iMjU2IiBjeT0iMjU2IiByPSIyNDAiIGZpbGw9IiM0RjQ2RTUiIHN0cm9rZT0iIzMxMkU4MSIgc3Ryb2tlLXdpZHRoPSI4Ii8+DQogIA0KICA8IS0tIOu5hOuUlOyYpCDtlYTrpoQg7Iqk7Yq466a9IC0tPg0KICA8cmVjdCB4PSIxMjAiIHk9IjE0MCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSI4MCIgcng9IjgiIGZpbGw9IiNGRkZGRkYiIG9wYWNpdHk9IjAuOSIvPg0KICA8cmVjdCB4PSIxNDAiIHk9IjE2MCIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiByeD0iNCIgZmlsbD0iIzRGNDZFNSIvPg0KICA8cmVjdCB4PSIxNzAiIHk9IjE2MCIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiByeD0iNCIgZmlsbD0iIzRGNDZFNSIvPg0KICA8cmVjdCB4PSIyMDAiIHk9IjE2MCIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiByeD0iNCIgZmlsbD0iIzRGNDZFNSIvPg0KICANCiAgPCEtLSDqsIDsnIQg7JWE7J207L2YIC0tPg0KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyODAsIDIwMCkiPg0KICAgIDwhLS0g6rCA7JyEIOyZvOyqvSDrgqAgLS0+DQogICAgPHBhdGggZD0iTSAwIDAgTCAyMCAtMzAgTCAzMCAtMjAgTCAxMCAxMCBaIiBmaWxsPSIjRkZGRkZGIiBzdHJva2U9IiMzMTJFODEiIHN0cm9rZS13aWR0aD0iMiIvPg0KICAgIDxjaXJjbGUgY3g9IjUiIGN5PSI1IiByPSI4IiBmaWxsPSIjRkZGRkZGIiBzdHJva2U9IiMzMTJFODEiIHN0cm9rZS13aWR0aD0iMiIvPg0KICAgIA0KICAgIDwhLS0g6rCA7JyEIOyYpOuluOyqvSDrgqAgLS0+DQogICAgPHBhdGggZD0iTSA0MCAwIEwgMjAgLTMwIEwgMTAgLTIwIEwgMzAgMTAgWiIgZmlsbD0iI0ZGRkZGRiIgc3Ryb2tlPSIjMzEyRTgxIiBzdHJva2Utd2lkdGg9IjIiLz4NCiAgICA8Y2lyY2xlIGN4PSI0NSIgY3k9IjUiIHI9IjgiIGZpbGw9IiNGRkZGRkYiIHN0cm9rZT0iIzMxMkU4MSIgc3Ryb2tlLXdpZHRoPSIyIi8+DQogIDwvZz4NCiAgDQogIDwhLS0g7ZSM66CI7J20IOuyhO2KvCAtLT4NCiAgPHBvbHlnb24gcG9pbnRzPSIyMDAsMzIwIDIwMCwzNjAgMjQwLDM0MCIgZmlsbD0iI0ZGRkZGRiIgb3BhY2l0eT0iMC45Ii8+DQogIA0KICA8IS0tIO2DgOyehOudvOyduCDrsJQgLS0+DQogIDxyZWN0IHg9IjEwMCIgeT0iNDAwIiB3aWR0aD0iMzEyIiBoZWlnaHQ9IjgiIHJ4PSI0IiBmaWxsPSIjRkZGRkZGIiBvcGFjaXR5PSIwLjkiLz4NCiAgPHJlY3QgeD0iMTAwIiB5PSI0MDAiIHdpZHRoPSIxNTYiIGhlaWdodD0iOCIgcng9IjQiIGZpbGw9IiMxMEI5ODEiLz4NCjwvc3ZnPg0K" style="max-width: 512px; height: auto;" />
+  <br><br>
+  <canvas id="canvas" width="512" height="512"></canvas>
+  <br><br>
+  <button onclick="downloadPNG()">PNG 다운로드</button>
+  
+  <script>
+    const img = document.getElementById('svgImage');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    img.onload = function() {
+      ctx.drawImage(img, 0, 0, 512, 512);
+    };
+    
+    function downloadPNG() {
+      const link = document.createElement('a');
+      link.download = 'cutflow-icon.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>

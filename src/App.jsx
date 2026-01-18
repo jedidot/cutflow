@@ -1008,6 +1008,7 @@ const CutFlowApp = () => {
     if (target.closest('[data-clip="true"]') ||
         target.closest('.timeline-clip') ||
         target.closest('.cursor-pointer') || 
+        target.closest('[data-resize-handle="true"]') ||
         target.closest('.resize-handle') || 
         target.closest('.cursor-ew-resize') ||
         target.closest('button')) {
@@ -1036,8 +1037,10 @@ const CutFlowApp = () => {
                    target.closest('.timeline-clip') ||
                    target.hasAttribute('data-clip-id') ||
                    target.closest('[data-clip-id]');
-    const isResizeHandle = target.closest('.cursor-ew-resize') || 
+    const isResizeHandle = target.closest('[data-resize-handle="true"]') ||
+                          target.closest('.cursor-ew-resize') || 
                           target.closest('.resize-handle') ||
+                          target.hasAttribute('data-resize-handle') ||
                           target.classList.contains('resize-handle') ||
                           target.classList.contains('cursor-ew-resize');
     const isButton = target.closest('button') || target.tagName === 'BUTTON';
@@ -1382,7 +1385,7 @@ const CutFlowApp = () => {
         {leftMenuActive && (
           <div 
             className="bg-gray-800 border-r border-gray-700 overflow-y-auto p-4 shadow-inner"
-            style={{ width: `${leftPanelWidth - 80}px` }}
+            style={{ width: `${Math.max(leftPanelWidth - 40, 220)}px` }}
           >
             {leftMenuActive === 'upload' && (
               <>
@@ -2592,7 +2595,7 @@ const CutFlowApp = () => {
                                 document.body.style.userSelect = 'none';
                               }}
                             >
-                              <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold relative pointer-events-none">
+                              <div className="h-full flex items-center justify-between px-2 text-xs text-white font-semibold relative pointer-events-none" style={{ paddingLeft: '8px', paddingRight: '8px' }}>
                                 <span className="truncate flex-1 pointer-events-none">{clip.name}</span>
                                 <div className="flex items-center gap-1 z-[101] relative pointer-events-auto">
                                   {isSelected && (
@@ -2641,15 +2644,19 @@ const CutFlowApp = () => {
                               {isSelected && (
                                 <>
                                   <div
+                                    data-resize-handle="true"
                                     className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-70 resize-handle"
                                     style={{ 
                                       pointerEvents: 'auto',
-                                      zIndex: 200
+                                      zIndex: 201
                                     }}
                                     onMouseDown={(e) => {
+                                      // capture phase에서 이벤트를 먼저 처리
                                       e.stopPropagation();
                                       e.preventDefault();
-                                      e.stopImmediatePropagation();
+                                      if (e.nativeEvent.stopImmediatePropagation) {
+                                        e.nativeEvent.stopImmediatePropagation();
+                                      }
                                       
                                       // 리사이즈 시작을 즉시 표시하여 재생 헤드가 방해하지 않도록
                                       setIsResizingClip(true);
@@ -2667,6 +2674,7 @@ const CutFlowApp = () => {
                                       
                                       const handleMouseMove = (e2) => {
                                         e2.preventDefault();
+                                        e2.stopPropagation();
                                         
                                         if (rafId !== null) return;
                                         
@@ -2760,15 +2768,19 @@ const CutFlowApp = () => {
                                     }}
                                   />
                                   <div
+                                    data-resize-handle="true"
                                     className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-yellow-400 bg-yellow-400 bg-opacity-70 resize-handle"
                                     style={{ 
                                       pointerEvents: 'auto',
-                                      zIndex: 200
+                                      zIndex: 201
                                     }}
                                     onMouseDown={(e) => {
+                                      // capture phase에서 이벤트를 먼저 처리
                                       e.stopPropagation();
                                       e.preventDefault();
-                                      e.stopImmediatePropagation();
+                                      if (e.nativeEvent.stopImmediatePropagation) {
+                                        e.nativeEvent.stopImmediatePropagation();
+                                      }
                                       
                                       // 리사이즈 시작을 즉시 표시하여 재생 헤드가 방해하지 않도록
                                       setIsResizingClip(true);
@@ -2785,6 +2797,7 @@ const CutFlowApp = () => {
                                       
                                       const handleMouseMove = (e2) => {
                                         e2.preventDefault();
+                                        e2.stopPropagation();
                                         
                                         if (rafId !== null) return;
                                         
@@ -2874,10 +2887,14 @@ const CutFlowApp = () => {
                                         setIsResizingClip(false);
                                         document.removeEventListener('mousemove', handleMouseMove, { capture: true });
                                         document.removeEventListener('mouseup', handleMouseUp, { capture: true });
+                                        document.body.style.cursor = '';
+                                        document.body.style.userSelect = '';
                                       };
                                       
                                       document.addEventListener('mousemove', handleMouseMove, { passive: false, capture: true });
                                       document.addEventListener('mouseup', handleMouseUp, { capture: true });
+                                      document.body.style.cursor = 'ew-resize';
+                                      document.body.style.userSelect = 'none';
                                     }}
                                   />
                                 </>

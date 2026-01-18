@@ -2447,6 +2447,8 @@ const CutFlowApp = () => {
                                 const initialStartTime = clip.startTime;
                                 
                                 setSelectedClip(clipId);
+                                // 클립 클릭 시 currentTime을 클립의 startTime으로 업데이트하여 텍스트가 표시되도록 함
+                                setCurrentTime(initialStartTime);
                                 // 클립 드래그 시작 표시 (즉시 설정하여 타임라인 핸들러가 이를 감지하도록)
                                 setDraggingClipTime(initialStartTime);
                                 

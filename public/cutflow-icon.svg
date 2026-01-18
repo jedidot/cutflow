@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 배경 원 -->
+  <circle cx="256" cy="256" r="240" fill="#4F46E5" stroke="#312E81" stroke-width="8"/>
+  
+  <!-- 비디오 필름 스트립 -->
+  <rect x="120" y="140" width="120" height="80" rx="8" fill="#FFFFFF" opacity="0.9"/>
+  <rect x="140" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
+  <rect x="170" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
+  <rect x="200" y="160" width="20" height="20" rx="4" fill="#4F46E5"/>
+  
+  <!-- 가위 아이콘 -->
+  <g transform="translate(280, 200)">
+    <!-- 가위 왼쪽 날 -->
+    <path d="M 0 0 L 20 -30 L 30 -20 L 10 10 Z" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+    <circle cx="5" cy="5" r="8" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+    
+    <!-- 가위 오른쪽 날 -->
+    <path d="M 40 0 L 20 -30 L 10 -20 L 30 10 Z" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+    <circle cx="45" cy="5" r="8" fill="#FFFFFF" stroke="#312E81" stroke-width="2"/>
+  </g>
+  
+  <!-- 플레이 버튼 -->
+  <polygon points="200,320 200,360 240,340" fill="#FFFFFF" opacity="0.9"/>
+  
+  <!-- 타임라인 바 -->
+  <rect x="100" y="400" width="312" height="8" rx="4" fill="#FFFFFF" opacity="0.9"/>
+  <rect x="100" y="400" width="156" height="8" rx="4" fill="#10B981"/>
+</svg>
